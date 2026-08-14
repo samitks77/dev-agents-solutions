@@ -69,11 +69,14 @@ $requiredParameterKeys = @(
   "grafanaOperatorObjectId"
 )
 
+$templateParameterKeys = @($template.parameters.PSObject.Properties.Name)
+$parameterFileKeys = @($parameters.parameters.PSObject.Properties.Name)
+
 foreach ($key in $requiredParameterKeys) {
-  if (-not $template.parameters.PSObject.Properties.Name.Contains($key)) {
+  if ($templateParameterKeys -notcontains $key) {
     throw "Required template parameter is missing: $key"
   }
-  if (-not $parameters.parameters.PSObject.Properties.Name.Contains($key)) {
+  if ($parameterFileKeys -notcontains $key) {
     throw "Required parameter file value is missing: $key"
   }
 }
