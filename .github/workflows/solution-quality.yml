@@ -1,0 +1,46 @@
+name: solution-quality
+
+on:
+  push:
+    paths:
+      - "README.md"
+      - "docs/**/*.md"
+      - "scripts/*.ps1"
+      - "templates/azuredeploy/*.json"
+      - "templates/azuredeploy/*.md"
+      - "templates/README.md"
+  pull_request:
+    paths:
+      - "README.md"
+      - "docs/**/*.md"
+      - "scripts/*.ps1"
+      - "templates/azuredeploy/*.json"
+      - "templates/azuredeploy/*.md"
+      - "templates/README.md"
+
+jobs:
+  validate-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate ARM JSON files parse
+        run: |
+          python -m json.tool templates/azuredeploy/guest-permissions-solution.json > /dev/null
+          python -m json.tool templates/azuredeploy/guest-permissions-solution.parameters.json > /dev/null
+
+  validate-powershell:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $scripts = Get-ChildItem -Path scripts -Filter *.ps1
+          foreach ($script in $scripts) {
+            Write-Host "Parsing $($script.FullName)"
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $script.FullName -Raw), [ref]$null)
+          }

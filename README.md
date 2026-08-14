@@ -1,32 +1,127 @@
-# dev-agents-solutions
-Here is where I build cool stuff.
+# Dev Agents Solutions
+
+Enterprise-ready solution patterns for identity and access visibility across Entra + Azure.
 
 ## Guest Permissions Agent Solution (Azure + M365)
 
-This repo now includes a shareable **Deploy to Azure** package for the Guest Permissions solution bootstrap.
+This solution gives security and IAM teams a repeatable way to answer:
+
+- Which guest users exist in the tenant?
+- What Azure resources can those guests reach?
+- What is their **effective** access after inheritance, groups, PIM state, and deny logic?
+
+It is designed for both:
+
+- Internal architecture and operations demos
+- Customer-facing deployment and handoff
+
+---
+
+## Deploy Now (Infrastructure Bootstrap)
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Ftemplates%2Fazuredeploy%2Fguest-permissions-solution.json)
 
-### What this deploys
+This deploys baseline infrastructure:
 
 - User-assigned managed identity
 - Log Analytics workspace
 - Storage account + Azure Files share
 - Container Apps environment
 - Azure Managed Grafana
-- Optional RBAC grants for a Grafana operator principal (Reader + Log Analytics Reader)
+- Optional operator RBAC grants
 
-### Package contents
+Why bootstrap first:
 
-- `templates/azuredeploy/guest-permissions-solution.json`
-- `templates/azuredeploy/guest-permissions-solution.parameters.json`
-- `docs/guest-permissions-deploy-to-azure.md`
+- You establish a secure, repeatable landing zone before runtime code and privileged identity grants are applied.
 
-### Next steps after infra bootstrap
+---
 
-1. Assign required Microsoft Graph app roles to the managed identity.
-2. Deploy the guest-permissions pipeline runtime job (container image + job command).
-3. Publish/import the Guest Permissions dashboard in Grafana.
-4. Optionally provision/publish the M365 control-plane agent that triggers and monitors runs.
+## Architecture at a Glance
 
-See full steps in: [`docs/guest-permissions-deploy-to-azure.md`](docs/guest-permissions-deploy-to-azure.md)
+```mermaid
+flowchart LR
+  A[Operator or M365 Agent] --> B[Control Plane Actions]
+  B --> C[Container Apps Job Runtime]
+
+  C --> D[Microsoft Graph\nGuests / Groups / Roles / PIM]
+  C --> E[Azure ARM\nRBAC + Deny Assignments]
+  C --> F[Service APIs\nData-plane ACL Signals]
+
+  C --> G[Azure Files\nSnapshots / Evidence]
+  C --> H[Log Analytics\nPipeline Telemetry]
+
+  H --> I[Grafana Dashboards]
+  A --> I
+```
+
+---
+
+## End-to-End Flow (What + Why)
+
+| Stage | What it does | Why it matters |
+|---|---|---|
+| 1. Bootstrap | Deploy identity, logging, storage, runtime host, and dashboard host | Gives you an enterprise baseline you can reproduce in every environment |
+| 2. Identity Grants | Apply required Graph + Azure permissions to runtime identity | Enforces least-privilege, auditable access to control planes |
+| 3. Collection | Collect Entra, RBAC, deny, PIM, and optional data-plane signals | Builds complete access context instead of partial snapshots |
+| 4. Resolution | Resolve effective guest permissions from all input snapshots | Produces action-ready evidence for governance and risk decisions |
+| 5. Visualization + Ops | Publish dashboard + run monitoring and response loops | Makes posture visible for analysts, engineers, and leadership |
+
+---
+
+## Quick Start
+
+1. Read the deployment runbook: [`docs/guest-permissions-deploy-to-azure.md`](docs/guest-permissions-deploy-to-azure.md)
+2. Validate template and parameters: `./scripts/validate-guest-permissions-bootstrap.ps1`
+3. Deploy infrastructure: `./scripts/deploy-guest-permissions-bootstrap.ps1`
+4. Run smoke checks: `./scripts/post-deploy-smoke-test.ps1`
+5. Walk through architecture and controls:
+   - [`docs/guest-permissions-architecture.md`](docs/guest-permissions-architecture.md)
+   - [`docs/guest-permissions-security-governance.md`](docs/guest-permissions-security-governance.md)
+6. Use the demo playbook:
+   - [`docs/guest-permissions-demo-playbook.md`](docs/guest-permissions-demo-playbook.md)
+
+---
+
+## Repository Map
+
+```text
+.
+├── .github/workflows/
+│   └── solution-quality.yml                   # JSON + PowerShell quality checks
+├── docs/
+│   ├── README.md                              # Documentation index
+│   ├── guest-permissions-architecture.md      # End-to-end architecture and trust boundaries
+│   ├── guest-permissions-deploy-to-azure.md   # Full deployment runbook (what + why)
+│   ├── guest-permissions-operations-runbook.md# Day-2 operations and troubleshooting
+│   ├── guest-permissions-security-governance.md # Security model and least-privilege design
+│   ├── guest-permissions-demo-playbook.md     # Internal + customer demo script
+│   └── guest-permissions-enterprise-readiness-checklist.md
+├── scripts/
+│   ├── deploy-guest-permissions-bootstrap.ps1 # Idempotent deployment wrapper
+│   ├── validate-guest-permissions-bootstrap.ps1 # Local + Azure validation
+│   └── post-deploy-smoke-test.ps1             # Post-deploy health checks
+└── templates/
+    ├── README.md
+    └── azuredeploy/
+        ├── README.md                           # Template usage and parameter guide
+        ├── guest-permissions-solution.json     # ARM bootstrap template
+        ├── guest-permissions-solution.parameters.json
+        └── guest-permissions-solution-explained.md # Resource-by-resource rationale
+```
+
+---
+
+## Enterprise Readiness Highlights
+
+- Explicit, step-by-step runbooks with **what each step does** and **why it exists**
+- Separation of concerns between infra deployment and privileged identity grants
+- Commented PowerShell scripts for repeatability and handoff
+- Post-deploy smoke tests for confidence before demo or customer onboarding
+- Security and governance guidance for least-privilege and auditability
+- Built-in GitHub workflow for template/script quality checks
+
+---
+
+## Documentation Hub
+
+Start here: [`docs/README.md`](docs/README.md)

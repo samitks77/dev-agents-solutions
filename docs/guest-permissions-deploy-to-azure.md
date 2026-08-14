@@ -1,60 +1,192 @@
-# Guest Permissions Solution — Deploy to Azure
+# Guest Permissions Solution — Deploy to Azure (Enterprise Runbook)
 
-This guide packages the Guest Permissions solution as a one-click Azure bootstrap.
+This runbook explains every deployment phase in plain English:
 
-## 1) One-click deploy
+- **What each step does**
+- **Why that step matters**
+- **How to validate success before moving on**
+
+---
+
+## 0) Prerequisites
+
+### What this does
+
+Confirms your operator machine and Azure permissions are ready.
+
+### Why this matters
+
+Most deployment failures happen before deployment starts (missing CLI, wrong subscription, insufficient RBAC).
+
+### Requirements
+
+- Azure subscription with rights to create resource groups and deploy resources
+- Azure CLI (`az`) installed and authenticated
+- PowerShell 7+ recommended
+- Access to this repository
+
+---
+
+## 1) Validate the template and parameter file
+
+### What this does
+
+Checks JSON validity and required template/parameter structure before deployment.
+
+### Why this matters
+
+Catches fast-fail issues early, so you do not lose time debugging deployment runtime errors.
+
+### Command
+
+```powershell
+.\scripts\validate-guest-permissions-bootstrap.ps1
+```
+
+---
+
+## 2) Deploy infrastructure bootstrap
+
+### What this does
+
+Deploys baseline resources:
+
+- User-assigned managed identity
+- Log Analytics workspace
+- Storage account + file share
+- Container Apps managed environment
+- Azure Managed Grafana
+- Optional Grafana operator RBAC grants
+
+### Why this matters
+
+This creates the minimum enterprise platform layer required for secure operation and observability.
+
+### Option A — Deploy button
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Ftemplates%2Fazuredeploy%2Fguest-permissions-solution.json)
 
-Template file:
+### Option B — Scripted deployment (recommended for repeatability)
 
-- `templates/azuredeploy/guest-permissions-solution.json`
+```powershell
+.\scripts\deploy-guest-permissions-bootstrap.ps1 `
+  -SubscriptionId "<subscription-guid>" `
+  -ResourceGroupName "rg-guest-permissions" `
+  -Location "eastus2"
+```
 
-Example parameter file:
+---
 
-- `templates/azuredeploy/guest-permissions-solution.parameters.json`
+## 3) Run post-deploy smoke tests
 
-## 2) What the template deploys
+### What this does
 
-1. User-assigned managed identity (runtime identity for collectors)
-2. Log Analytics workspace (pipeline telemetry + query surface)
-3. Storage account + Azure Files share (snapshot and artifact persistence)
-4. Container Apps managed environment (job runtime host)
-5. Azure Managed Grafana (dashboard host)
-6. Optional RBAC grants for a provided operator object ID
+Verifies that all required infrastructure resources are present and readable.
 
-## 3) Required post-deploy steps
+### Why this matters
 
-The template intentionally bootstraps infrastructure only. You still need to complete runtime and identity permissions:
+Proves baseline health before you move to identity grants and runtime deployment.
 
-1. **Microsoft Graph permissions**
-   - Assign required Graph app roles to the managed identity service principal (for Entra guest/user/group/role/PIM reads).
-2. **Pipeline runtime deployment**
-   - Build/push the guest-permissions runtime image.
-   - Create/update Container Apps Job with environment variables and command sequence.
-3. **Dashboard publication**
-   - Configure Azure Monitor / Log Analytics datasource in Grafana.
-   - Publish the guest-permissions dashboard JSON.
-4. **M365 control-plane agent (optional)**
-   - Provision and publish the M365 declarative agent to trigger and monitor runs.
+### Command
 
-## 4) Validation checklist
+```powershell
+.\scripts\post-deploy-smoke-test.ps1 `
+  -ResourceGroupName "rg-guest-permissions" `
+  -ManagedIdentityName "mi-guest-permissions" `
+  -LogAnalyticsWorkspaceName "law-guest-permissions" `
+  -ContainerAppsEnvironmentName "cae-guest-permissions" `
+  -GrafanaName "amg-guest-permissions" `
+  -FileShareName "guest-permissions"
+```
 
-After deployment + post-deploy setup:
+---
 
-1. Container Apps Job exists and can run successfully.
-2. Log Analytics contains pipeline telemetry rows (stage summaries, coverage, effective rows).
-3. Grafana dashboard renders with live run metrics.
-4. Effective snapshot artifacts are present in storage for the run.
+## 4) Apply required identity permissions (manual control gate)
 
-## 5) Suggested structure for automation
+### What this does
 
-To make this fully repeatable in CI/CD:
+Assigns the Graph and Azure permissions needed by your runtime identity.
 
-1. **Stage A**: ARM/Bicep infra deploy (this template)
-2. **Stage B**: Identity grants (Graph app role assignments)
-3. **Stage C**: Runtime deployment (job + image)
-4. **Stage D**: Dashboard deployment (datasource + dashboard)
-5. **Stage E**: Agent publish (optional M365 control plane)
+### Why this matters
 
-This separation keeps infra idempotent and allows controlled approvals for privileged identity operations.
+Identity grants are high-impact changes and should be separated from infrastructure deployment for approval and audit.
+
+### Typical grant categories
+
+- Entra read permissions for guests/groups/roles/PIM schedules
+- Azure RBAC read scopes for subscription/resource discovery
+- Optional service data-plane read permissions where needed
+
+> Use your internal least-privilege policy to finalize exact grants.
+
+---
+
+## 5) Deploy or connect the runtime collector
+
+### What this does
+
+Deploys the pipeline runtime (container/job) that collects and resolves guest permissions data.
+
+### Why this matters
+
+Without runtime execution, infrastructure is only a shell; no security evidence is produced.
+
+### Inputs required from bootstrap outputs
+
+- Managed identity client/principal IDs
+- Log Analytics workspace ID
+- Container Apps environment ID
+- Storage account and share names
+
+---
+
+## 6) Publish dashboard and connect observability
+
+### What this does
+
+Configures Grafana data sources and imports/publishes dashboard(s).
+
+### Why this matters
+
+Turns raw telemetry into analyst-friendly insights and executive reporting.
+
+---
+
+## 7) Optional: publish M365 control-plane agent
+
+### What this does
+
+Adds an operator front-door where users can trigger runs and review statuses conversationally.
+
+### Why this matters
+
+Improves adoption and operational speed for both technical and non-technical operators.
+
+---
+
+## 8) Final validation before demo/customer handoff
+
+### What this does
+
+Confirms end-to-end pipeline success.
+
+### Why this matters
+
+Ensures confidence and credibility before internal or customer demos.
+
+### Must-pass checks
+
+1. Runtime executes successfully.
+2. Telemetry lands in Log Analytics.
+3. Dashboard renders live data.
+4. Effective snapshot artifacts are generated.
+
+---
+
+## Reference files
+
+- Template: `templates/azuredeploy/guest-permissions-solution.json`
+- Parameters: `templates/azuredeploy/guest-permissions-solution.parameters.json`
+- Template explanation: `templates/azuredeploy/guest-permissions-solution-explained.md`
+- Operations guide: `docs/guest-permissions-operations-runbook.md`
+- Security model: `docs/guest-permissions-security-governance.md`
