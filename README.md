@@ -40,19 +40,49 @@ Why bootstrap first:
 
 ```mermaid
 flowchart LR
-  A[Operator or M365 Agent] --> B[Control Plane Actions]
-  B --> C[Container Apps Job Runtime]
+  subgraph X[Analyst Experience Layer]
+    IAM[IAM Analyst]
+    SOC[SOC Analyst]
+    M365[M365 Copilot Agent Channel]
+    SC[Security Copilot Skill or Promptbook]
+    CSTUDIO[Copilot Studio Agent]
+  end
 
-  C --> D[Microsoft Graph\nGuests / Groups / Roles / PIM]
-  C --> E[Azure ARM\nRBAC + Deny Assignments]
-  C --> F[Service APIs\nData-plane ACL Signals]
+  CP[Shared Control Plane APIs]
+  RT[Container Apps Job Runtime]
 
-  C --> G[Azure Files\nSnapshots / Evidence]
-  C --> H[Log Analytics\nPipeline Telemetry]
+  G[Microsoft Graph\nGuests / Groups / Roles / PIM]
+  A[Azure ARM\nRBAC + Deny Assignments]
+  DP[Service APIs\nData-plane ACL Signals]
 
-  H --> I[Grafana Dashboards]
-  A --> I
+  S[Azure Files\nSnapshots / Evidence]
+  L[Log Analytics\nPipeline Telemetry]
+  D[Grafana Dashboards]
+
+  IAM --> CP
+  SOC --> CP
+  M365 --> CP
+  SC --> CP
+  CSTUDIO --> CP
+
+  CP --> RT
+  RT --> G
+  RT --> A
+  RT --> DP
+
+  RT --> S
+  RT --> L
+  L --> D
+  SOC --> D
+  IAM --> D
 ```
+
+### Agent surface strategy (recommended)
+
+- **Primary SOC experience:** Security Copilot (best analyst fit for Defender/Sentinel workflows)
+- **Primary IAM and cross-team experience:** Copilot Studio agent (flexible orchestration + channel options)
+- **Optional distribution channel:** M365 Copilot declarative agent
+- **Core rule:** all surfaces call the same control-plane APIs and runtime pipeline
 
 ---
 
