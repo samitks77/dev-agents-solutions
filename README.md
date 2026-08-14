@@ -70,14 +70,15 @@ flowchart LR
 
 ## Quick Start
 
-1. Read the deployment runbook: [`docs/guest-permissions-deploy-to-azure.md`](docs/guest-permissions-deploy-to-azure.md)
-2. Validate template and parameters: `./scripts/validate-guest-permissions-bootstrap.ps1`
-3. Deploy infrastructure: `./scripts/deploy-guest-permissions-bootstrap.ps1`
-4. Run smoke checks: `./scripts/post-deploy-smoke-test.ps1`
-5. Walk through architecture and controls:
+1. Start with the field briefing artifact: [`docs/guest-permissions-field-briefing.html`](docs/guest-permissions-field-briefing.html)
+2. Read the deployment runbook: [`docs/guest-permissions-deploy-to-azure.md`](docs/guest-permissions-deploy-to-azure.md)
+3. Validate template and parameters: `./scripts/validate-guest-permissions-bootstrap.ps1`
+4. Deploy infrastructure: `./scripts/deploy-guest-permissions-bootstrap.ps1`
+5. Run smoke checks: `./scripts/post-deploy-smoke-test.ps1`
+6. Walk through architecture and controls:
    - [`docs/guest-permissions-architecture.md`](docs/guest-permissions-architecture.md)
    - [`docs/guest-permissions-security-governance.md`](docs/guest-permissions-security-governance.md)
-6. Use the demo playbook:
+7. Use the demo playbook:
    - [`docs/guest-permissions-demo-playbook.md`](docs/guest-permissions-demo-playbook.md)
 
 ---
@@ -90,6 +91,7 @@ flowchart LR
 │   └── solution-quality.yml                   # JSON + PowerShell quality checks
 ├── docs/
 │   ├── README.md                              # Documentation index
+│   ├── guest-permissions-field-briefing.html  # World-class field briefing artifact
 │   ├── guest-permissions-architecture.md      # End-to-end architecture and trust boundaries
 │   ├── guest-permissions-deploy-to-azure.md   # Full deployment runbook (what + why)
 │   ├── guest-permissions-operations-runbook.md# Day-2 operations and troubleshooting

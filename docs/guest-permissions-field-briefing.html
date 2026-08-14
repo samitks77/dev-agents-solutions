@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guest Permissions Command Center — Field Briefing</title>
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+code, .mono {
+  font-family: Consolas, "Courier New", Courier, monospace;
+}
+
+.layout {
+  display: flex;
+  max-width: 1480px;
+  margin: 0 auto;
+  gap: 28px;
+  padding: 0 24px;
+}
+
+nav {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  width: 260px;
+  flex-shrink: 0;
+  padding: 28px 0 40px;
+}
+
+nav .navtitle {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--cp-text-soft);
+  margin: 0 0 12px 12px;
+  font-weight: 700;
+}
+
+nav a {
+  display: block;
+  padding: 7px 12px;
+  margin-bottom: 2px;
+  color: var(--cp-text-muted);
+  text-decoration: none;
+  border-radius: 0.625rem;
+  font-size: 0.86rem;
+  border-left: 2px solid transparent;
+}
+
+nav a:hover {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+}
+
+nav a.active {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  border-left-color: var(--cp-accent);
+  font-weight: 600;
+}
+
+main {
+  flex: 1;
+  min-width: 0;
+  padding: 28px 0 120px;
+}
+
+header.hero {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  padding: 32px 34px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border-strong);
+}
+
+header.hero h1 {
+  margin: 0 0 6px;
+  font-size: 2.1rem;
+  letter-spacing: -0.02em;
+}
+
+header.hero .sub {
+  color: var(--cp-text-muted);
+  font-size: 1rem;
+  margin-bottom: 18px;
+}
+
+.metarow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip {
+  background: var(--cp-surface-soft);
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 0.79rem;
+  color: var(--cp-text-muted);
+}
+
+.chip strong {
+  color: var(--cp-text);
+}
+
+.classbanner {
+  background: var(--cp-accent-soft);
+  border: 1px solid var(--cp-accent);
+  border-radius: 0.625rem;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 0.87rem;
+  color: var(--cp-text);
+}
+
+.classbanner strong {
+  color: var(--cp-accent);
+}
+
+section {
+  margin-bottom: 34px;
+  scroll-margin-top: 20px;
+}
+
+section > h2 {
+  font-size: 1.32rem;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+section > .lede {
+  color: var(--cp-text-muted);
+  margin: 0 0 16px;
+  font-size: 0.94rem;
+}
+
+.card {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  padding: 22px 24px;
+  margin-bottom: 14px;
+  box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border-strong);
+}
+
+.card h3 {
+  margin: 0 0 10px;
+  font-size: 1.02rem;
+}
+
+.card h3.first {
+  margin-top: 0;
+}
+
+.card h4 {
+  margin: 18px 0 8px;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cp-text-soft);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 14px;
+}
+
+.grid4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.stat {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  padding: 18px;
+  text-align: center;
+}
+
+.stat .big {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--cp-accent);
+  line-height: 1.15;
+}
+
+.stat .cap {
+  font-size: 0.79rem;
+  color: var(--cp-text-muted);
+  margin-top: 5px;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.tl-step {
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface-soft);
+  border-radius: 0.625rem;
+  padding: 14px;
+}
+
+.tl-step .yr {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  color: var(--cp-accent);
+  text-transform: uppercase;
+}
+
+.tl-step .ttl {
+  font-weight: 700;
+  margin: 5px 0 4px;
+  font-size: 0.95rem;
+}
+
+.tl-step .dsc {
+  font-size: 0.83rem;
+  color: var(--cp-text-muted);
+}
+
+.callout {
+  border-left: 3px solid var(--cp-accent);
+  background: var(--cp-accent-soft);
+  padding: 13px 17px;
+  border-radius: 0 0.625rem 0.625rem 0;
+  margin: 12px 0;
+  font-size: 0.9rem;
+}
+
+.callout.warn {
+  border-left-color: var(--cp-warning);
+  background: var(--cp-surface-soft);
+}
+
+.callout.good {
+  border-left-color: var(--cp-success);
+  background: var(--cp-surface-soft);
+}
+
+.callout.stop {
+  border-left-color: var(--cp-danger);
+  background: var(--cp-surface-soft);
+}
+
+.callout .lbl {
+  font-weight: 700;
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.82rem;
+}
+
+a.ref {
+  color: var(--cp-link);
+  text-decoration: none;
+}
+
+a.ref:hover {
+  text-decoration: underline;
+}
+
+ul.tight {
+  margin: 8px 0;
+  padding-left: 19px;
+}
+
+ul.tight li {
+  margin-bottom: 5px;
+  font-size: 0.9rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.87rem;
+  margin: 6px 0;
+}
+
+th {
+  text-align: left;
+  padding: 9px 11px;
+  border-bottom: 2px solid var(--cp-border-strong);
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cp-text-soft);
+  white-space: nowrap;
+}
+
+td {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--cp-border);
+  vertical-align: top;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--cp-surface-soft);
+}
+
+.tblwrap {
+  overflow-x: auto;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.b-core {
+  background: var(--cp-accent);
+  color: var(--cp-accent-fg);
+}
+
+.b-ctrl {
+  background: var(--cp-link);
+  color: var(--cp-surface);
+}
+
+.b-data {
+  background: var(--cp-success);
+  color: var(--cp-surface);
+}
+
+.b-risk {
+  background: var(--cp-surface);
+  color: var(--cp-warning);
+  border: 1px solid var(--cp-warning);
+}
+
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.pipe-step {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface-soft);
+  padding: 14px;
+}
+
+.pipe-step:first-child {
+  border-radius: 0.625rem 0 0 0.625rem;
+}
+
+.pipe-step:last-child {
+  border-radius: 0 0.625rem 0.625rem 0;
+}
+
+.pipe-step .pn {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--cp-accent);
+}
+
+.pipe-step .pt {
+  font-weight: 700;
+  margin: 3px 0 5px;
+}
+
+.pipe-step .pd {
+  font-size: 0.82rem;
+  color: var(--cp-text-muted);
+}
+
+.runsheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run {
+  display: flex;
+  gap: 15px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  background: var(--cp-surface-soft);
+  border-radius: 0.625rem;
+  border: 1px solid var(--cp-border);
+}
+
+.run .tm {
+  font-weight: 800;
+  color: var(--cp-accent);
+  font-size: 0.83rem;
+  width: 70px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.run .rb {
+  font-size: 0.88rem;
+}
+
+.run .rb strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.run .rb span {
+  color: var(--cp-text-muted);
+  font-size: 0.84rem;
+}
+
+.qa {
+  border-bottom: 1px solid var(--cp-border);
+  padding: 13px 0;
+}
+
+.qa:last-child {
+  border-bottom: none;
+}
+
+.qa .q {
+  font-weight: 700;
+  margin-bottom: 5px;
+  font-size: 0.93rem;
+}
+
+.qa .q::before {
+  content: "Q ";
+  color: var(--cp-accent);
+  font-weight: 800;
+}
+
+.qa .a {
+  font-size: 0.89rem;
+  color: var(--cp-text-muted);
+}
+
+.qa .a::before {
+  content: "A ";
+  color: var(--cp-success);
+  font-weight: 800;
+}
+
+footer {
+  color: var(--cp-text-soft);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 26px 0 10px;
+  border-top: 1px solid var(--cp-border);
+  margin-top: 32px;
+}
+
+@media (max-width: 980px) {
+  nav {
+    display: none;
+  }
+  .layout {
+    padding: 0 16px;
+  }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav>
+    <p class="navtitle">Contents</p>
+    <a href="#tldr">TL;DR</a>
+    <a href="#problem">Problem and outcomes</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#components">Components</a>
+    <a href="#api-map">API coverage map</a>
+    <a href="#resolver">Effective resolver logic</a>
+    <a href="#deploy">Deployment model</a>
+    <a href="#security">Security and governance</a>
+    <a href="#operations">Operations model</a>
+    <a href="#demo">Demo talk track</a>
+    <a href="#objections">Objection handling</a>
+    <a href="#rollout">30-day rollout plan</a>
+    <a href="#sources">Sources</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <h1>Guest Permissions Command Center</h1>
+      <div class="sub">Field briefing for internal architecture review and customer-facing solution demos.</div>
+      <div class="metarow">
+        <span class="chip">Audience: <strong>Security engineering, IAM, SOC, platform</strong></span>
+        <span class="chip">Mode: <strong>Internal + customer-safe</strong></span>
+        <span class="chip">Scope: <strong>Entra + Azure</strong></span>
+        <span class="chip">Deployment: <strong>ARM bootstrap + scripted post-deploy</strong></span>
+        <span class="chip">Ops model: <strong>Manual + scheduled + agent-triggered</strong></span>
+      </div>
+    </header>
+
+    <div class="classbanner">
+      <strong>How to use this briefing:</strong> present sections 1–8 for internal deep-dive, then use sections 9–13 for customer storyline, Q&A, and rollout commitment.
+    </div>
+
+    <section id="tldr">
+      <h2>TL;DR — 60 second version</h2>
+      <p class="lede">If your team only remembers one page, it should be this one.</p>
+      <div class="card">
+        <ul class="tight">
+          <li><strong>Business problem:</strong> guest access visibility is fragmented across identity, RBAC, and service-level controls.</li>
+          <li><strong>What we built:</strong> an end-to-end solution that collects Entra guests, maps Azure access, resolves effective permissions, and publishes operational telemetry.</li>
+          <li><strong>Why this is enterprise-grade:</strong> infrastructure bootstrap, explicit identity grant gate, repeatable scripts, smoke tests, and governance runbooks.</li>
+          <li><strong>How operators use it:</strong> manual runs, scheduled runs, and optional M365 agent orchestration.</li>
+          <li><strong>What executives get:</strong> clear evidence of who can access what, where risk sits, and where remediation should start.</li>
+        </ul>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="big">11k+</div><div class="cap">Guest users at target scale</div></div>
+        <div class="stat"><div class="big">5</div><div class="cap">Deployment stages</div></div>
+        <div class="stat"><div class="big">8+</div><div class="cap">Service data-plane modules</div></div>
+        <div class="stat"><div class="big">3</div><div class="cap">Operation modes</div></div>
+        <div class="stat"><div class="big">1</div><div class="cap">Unified evidence pipeline</div></div>
+      </div>
+    </section>
+
+    <section id="problem">
+      <h2>Problem statement and outcomes</h2>
+      <p class="lede">This section translates architecture into business impact.</p>
+      <div class="grid2">
+        <div class="card">
+          <h3 class="first">What is hard today</h3>
+          <ul class="tight">
+            <li>Guest inventory lives in one place, but effective cloud access is spread across many control planes.</li>
+            <li>RBAC-only views are incomplete when PIM, deny assignments, and group transitivity are not included.</li>
+            <li>Service-native ACLs create blind spots if only management-plane permissions are analyzed.</li>
+            <li>Manual evidence gathering is slow and not repeatable enough for governance reviews.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="first">What this solution changes</h3>
+          <ul class="tight">
+            <li>One repeatable collection workflow across Entra, Azure RBAC, and data-plane modules.</li>
+            <li>One effective-permissions output model with direct, inherited, group, deny, and PIM state.</li>
+            <li>One telemetry plane for run quality, failures, coverage, and trending.</li>
+            <li>One dashboard and briefing motion for internal and customer governance discussions.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Outcome matrix</h4>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Outcome</th>
+                <th>What the team can now do</th>
+                <th>Why it matters</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Identity visibility</td>
+                <td>Enumerate all guest principals and transitive group paths</td>
+                <td>Find indirect access that direct assignment reviews miss</td>
+              </tr>
+              <tr>
+                <td>Resource authorization visibility</td>
+                <td>Map RBAC roles across MG/subscription/RG/resource scopes</td>
+                <td>Understand real blast radius, not single-scope snapshots</td>
+              </tr>
+              <tr>
+                <td>Risk posture visibility</td>
+                <td>Prioritize high-risk guest-resource relationships</td>
+                <td>Focus remediation on meaningful exposure first</td>
+              </tr>
+              <tr>
+                <td>Operational reliability</td>
+                <td>Run repeatedly with validation, smoke tests, and telemetry</td>
+                <td>Supports production operations and audit confidence</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Architecture blueprint</h2>
+      <p class="lede">Designed to separate infrastructure, identity governance, runtime execution, and presentation.</p>
+      <div class="card">
+        <h4>End-to-end flow</h4>
+        <div class="pipeline">
+          <div class="pipe-step">
+            <div class="pn">LAYER 1</div>
+            <div class="pt">Operator and agent control plane</div>
+            <div class="pd">Human operators or M365 agent initiate and monitor runs.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">LAYER 2</div>
+            <div class="pt">Runtime execution host</div>
+            <div class="pd">Container Apps Job executes collection and resolution stages.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">LAYER 3</div>
+            <div class="pt">Permission source systems</div>
+            <div class="pd">Graph, ARM, and service APIs provide identity and access evidence.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">LAYER 4</div>
+            <div class="pt">Evidence and observability</div>
+            <div class="pd">Snapshots in storage, telemetry in Log Analytics, dashboards in Grafana.</div>
+          </div>
+        </div>
+
+        <div class="callout">
+          <span class="lbl">Architectural principle</span>
+          Infrastructure deployment and privileged identity grants are separated on purpose. This enables safer approvals, cleaner audits, and controlled change management.
+        </div>
+
+        <h4>Design timeline</h4>
+        <div class="timeline">
+          <div class="tl-step">
+            <div class="yr">Stage A</div>
+            <div class="ttl">Bootstrap platform</div>
+            <div class="dsc">Deploy identity, logging, storage, runtime host, and dashboard host.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Stage B</div>
+            <div class="ttl">Authorize runtime</div>
+            <div class="dsc">Grant least-privilege Graph and Azure rights to managed identity.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Stage C</div>
+            <div class="ttl">Run pipeline</div>
+            <div class="dsc">Collect Entra, RBAC, deny, PIM, and service-level data-plane signals.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Stage D</div>
+            <div class="ttl">Resolve and visualize</div>
+            <div class="dsc">Compute effective access and publish dashboard insights.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="components">
+      <h2>Component inventory — what and why</h2>
+      <p class="lede">This is the implementation map to explain every moving piece.</p>
+      <div class="card">
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Type</th>
+                <th>What it does</th>
+                <th>Why it exists</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="badge b-core">ARM bootstrap template</span></td>
+                <td>Infrastructure</td>
+                <td>Deploys managed identity, Log Analytics, storage, Container Apps environment, and Managed Grafana.</td>
+                <td>Creates consistent landing zone across environments.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-ctrl">Validation script</span></td>
+                <td>Automation</td>
+                <td>Validates template and parameters locally and optionally in Azure.</td>
+                <td>Catches deployment defects before runtime failures.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-ctrl">Deployment script</span></td>
+                <td>Automation</td>
+                <td>Runs idempotent bootstrap deployment and prints integration outputs.</td>
+                <td>Standardizes operator workflow and handoff quality.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-ctrl">Smoke test script</span></td>
+                <td>Automation</td>
+                <td>Asserts all bootstrap resources exist and are queryable.</td>
+                <td>Provides objective confidence before demo/go-live.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-data">Collection runtime</span></td>
+                <td>Runtime</td>
+                <td>Collects identity, RBAC, and service ACL surfaces and emits telemetry.</td>
+                <td>Produces evidence for effective access analytics.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-data">Effective resolver</span></td>
+                <td>Analytics</td>
+                <td>Combines direct, inherited, group, deny, and PIM states into final access rows.</td>
+                <td>Moves from raw permissions to decision-ready findings.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-data">Grafana dashboards</span></td>
+                <td>Visualization</td>
+                <td>Renders posture, coverage, and run-health telemetry.</td>
+                <td>Supports operators, architects, and executives with shared visibility.</td>
+              </tr>
+              <tr>
+                <td><span class="badge b-ctrl">M365 control-plane agent</span></td>
+                <td>Orchestration</td>
+                <td>Offers conversational run orchestration and status lookup.</td>
+                <td>Improves operational adoption and speed.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="api-map">
+      <h2>Concrete API coverage map</h2>
+      <p class="lede">Reference view for engineering and customer architecture teams.</p>
+
+      <div class="card">
+        <h4>Identity and directory plane (Microsoft Graph)</h4>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Representative API</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Guest users</td>
+                <td><span class="mono">GET /v1.0/users?$filter=userType eq 'Guest'</span></td>
+                <td>Enumerate all guest principals and metadata.</td>
+              </tr>
+              <tr>
+                <td>Transitive groups</td>
+                <td><span class="mono">GET /v1.0/users/{id}/transitiveMemberOf</span></td>
+                <td>Capture indirect group-based access paths.</td>
+              </tr>
+              <tr>
+                <td>Directory roles</td>
+                <td><span class="mono">GET /v1.0/directoryRoles</span> + members</td>
+                <td>Map privileged directory role exposure.</td>
+              </tr>
+              <tr>
+                <td>Entra PIM schedule state</td>
+                <td><span class="mono">GET /v1.0/roleManagement/directory/*ScheduleInstances</span></td>
+                <td>Differentiate eligible vs active role posture.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Azure management plane (ARM + Authorization)</h4>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Representative API</th>
+                <th>Scope</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Role definitions</td>
+                <td><span class="mono">.../providers/Microsoft.Authorization/roleDefinitions</span></td>
+                <td>MG, subscription, RG, resource</td>
+              </tr>
+              <tr>
+                <td>Role assignments</td>
+                <td><span class="mono">.../providers/Microsoft.Authorization/roleAssignments</span></td>
+                <td>MG, subscription, RG, resource</td>
+              </tr>
+              <tr>
+                <td>Deny assignments</td>
+                <td><span class="mono">.../providers/Microsoft.Authorization/denyAssignments</span></td>
+                <td>MG, subscription, RG, resource</td>
+              </tr>
+              <tr>
+                <td>RBAC PIM state</td>
+                <td><span class="mono">.../providers/Microsoft.Authorization/*Schedule*</span></td>
+                <td>Eligible and active assignment timelines</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Service-native data plane modules</h4>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Representative API family</th>
+                <th>Signal type</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Storage</td>
+                <td>Blob/container ACL and posture APIs</td>
+                <td>Container-level access posture</td>
+              </tr>
+              <tr>
+                <td>Key Vault</td>
+                <td>Vault access policy surfaces</td>
+                <td>Legacy policy exposure</td>
+              </tr>
+              <tr>
+                <td>SQL</td>
+                <td>Server and admin configuration APIs</td>
+                <td>Administrative access posture</td>
+              </tr>
+              <tr>
+                <td>Service Bus / Event Hub</td>
+                <td>Namespace authorization rule APIs</td>
+                <td>Namespace-level access routes</td>
+              </tr>
+              <tr>
+                <td>Cosmos DB</td>
+                <td>Account posture and permission surfaces</td>
+                <td>Data account exposure context</td>
+              </tr>
+              <tr>
+                <td>ACR</td>
+                <td>Registry posture APIs</td>
+                <td>Image and registry access posture</td>
+              </tr>
+              <tr>
+                <td>App Configuration</td>
+                <td>Configuration store access APIs</td>
+                <td>Store-level access and posture</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <span class="lbl">Why this section matters</span>
+          RBAC gives authoritative management-plane permissions across Azure. Data-plane modules add service-specific context that RBAC alone does not express.
+        </div>
+      </div>
+    </section>
+
+    <section id="resolver">
+      <h2>Effective permission resolver logic</h2>
+      <p class="lede">This is the core algorithmic value of the solution.</p>
+      <div class="card">
+        <h4>Resolution sequence</h4>
+        <div class="pipeline">
+          <div class="pipe-step">
+            <div class="pn">STEP 1</div>
+            <div class="pt">Normalize principals</div>
+            <div class="pd">Map guest principal IDs and transitive group IDs into a single subject set.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">STEP 2</div>
+            <div class="pt">Expand scope inheritance</div>
+            <div class="pd">Apply assignment inheritance from management group to resource scope.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">STEP 3</div>
+            <div class="pt">Merge role semantics</div>
+            <div class="pd">Join role assignments to role definitions and extract control/data actions.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">STEP 4</div>
+            <div class="pt">Apply deny and PIM state</div>
+            <div class="pd">Constrain effective grants by deny assignments and eligible/active timing.</div>
+          </div>
+          <div class="pipe-step">
+            <div class="pn">STEP 5</div>
+            <div class="pt">Emit final evidence</div>
+            <div class="pd">Write effective rows and telemetry for dashboards and audits.</div>
+          </div>
+        </div>
+
+        <div class="callout good">
+          <span class="lbl">Critical design decision</span>
+          The resolver is deterministic and evidence-backed. Every effective row should be traceable to source artifacts for auditability and remediation confidence.
+        </div>
+      </div>
+    </section>
+
+    <section id="deploy">
+      <h2>Deployment model — operator runbook summary</h2>
+      <p class="lede">The same path supports pilot, production, and customer handoff.</p>
+
+      <div class="card">
+        <h4>Execution stages</h4>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th>What to run</th>
+                <th>Expected output</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Stage A — Validate</td>
+                <td><span class="mono">scripts/validate-guest-permissions-bootstrap.ps1</span></td>
+                <td>Template and parameter checks pass</td>
+              </tr>
+              <tr>
+                <td>Stage B — Deploy infra</td>
+                <td><span class="mono">scripts/deploy-guest-permissions-bootstrap.ps1</span></td>
+                <td>Bootstrap resources + output IDs</td>
+              </tr>
+              <tr>
+                <td>Stage C — Smoke test</td>
+                <td><span class="mono">scripts/post-deploy-smoke-test.ps1</span></td>
+                <td>All core resources validated</td>
+              </tr>
+              <tr>
+                <td>Stage D — Runtime onboarding</td>
+                <td>Apply identity grants and deploy runtime job</td>
+                <td>Executable collection pipeline</td>
+              </tr>
+              <tr>
+                <td>Stage E — Visual and agent layer</td>
+                <td>Publish dashboard and optional M365 agent</td>
+                <td>Operational and executive front-door</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="first">Deploy button path</h3>
+          <p>Use the one-click bootstrap from repository root and continue with post-deploy scripts in sequence.</p>
+          <p><a class="ref" href="../README.md">Open repository README</a></p>
+        </div>
+        <div class="card">
+          <h3 class="first">Scripted path</h3>
+          <p>Use script-first deployment for repeatability in internal and customer environments.</p>
+          <p><a class="ref" href="guest-permissions-deploy-to-azure.md">Open full deployment runbook</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="security">
+      <h2>Security and governance model</h2>
+      <p class="lede">Designed for least privilege, auditability, and controlled autonomy.</p>
+      <div class="grid3">
+        <div class="card">
+          <h3 class="first">Identity separation</h3>
+          <ul class="tight">
+            <li>Runtime uses managed identity.</li>
+            <li>Operators use human RBAC identities.</li>
+            <li>Optional agent uses control-plane boundaries.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="first">Change-control separation</h3>
+          <ul class="tight">
+            <li>Infrastructure deployment is one gate.</li>
+            <li>Privileged identity grants are separate gate.</li>
+            <li>Runtime changes are versioned and testable.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="first">Audit and evidence</h3>
+          <ul class="tight">
+            <li>Deployment history in Azure deployment records.</li>
+            <li>Execution traces in Log Analytics.</li>
+            <li>Snapshot artifacts in storage for verification.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout stop">
+        <span class="lbl">Non-negotiable production rule</span>
+        Do not blend infrastructure deployment with privileged identity grants in one opaque step. Keep approvals and logs separate.
+      </div>
+    </section>
+
+    <section id="operations">
+      <h2>Operations model and reliability</h2>
+      <p class="lede">Day-2 guidance for SOC and platform teams.</p>
+      <div class="grid2">
+        <div class="card">
+          <h3 class="first">Daily checks</h3>
+          <ul class="tight">
+            <li>Latest run status successful</li>
+            <li>Telemetry present in workspace</li>
+            <li>Dashboard freshness within expected interval</li>
+            <li>No unresolved high-severity pipeline errors</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="first">Weekly checks</h3>
+          <ul class="tight">
+            <li>Coverage trend and error trend review</li>
+            <li>Top risky guest-resource relationships review</li>
+            <li>Permission drift review for runtime identity</li>
+            <li>Backlog and remediation tracking update</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Core KPIs</h4>
+        <div class="grid4">
+          <div class="stat"><div class="big">Run %</div><div class="cap">Success rate</div></div>
+          <div class="stat"><div class="big">TTR</div><div class="cap">Time to recover failed runs</div></div>
+          <div class="stat"><div class="big">Coverage</div><div class="cap">Resources scanned vs expected</div></div>
+          <div class="stat"><div class="big">Risk</div><div class="cap">High-priority guest edges</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="demo">
+      <h2>Demo talk track — internal and customer</h2>
+      <p class="lede">Use this as your meeting script.</p>
+      <div class="card">
+        <h4>Internal team briefing (45 minutes)</h4>
+        <div class="runsheet">
+          <div class="run"><div class="tm">0–7</div><div class="rb"><strong>Problem framing</strong><span>Explain fragmented guest access visibility and compliance pressure.</span></div></div>
+          <div class="run"><div class="tm">7–15</div><div class="rb"><strong>Architecture walkthrough</strong><span>Walk the layered design and why separation-of-duties is central.</span></div></div>
+          <div class="run"><div class="tm">15–24</div><div class="rb"><strong>API coverage depth</strong><span>Show Entra, RBAC, deny, PIM, and service data-plane coverage map.</span></div></div>
+          <div class="run"><div class="tm">24–33</div><div class="rb"><strong>Deployment and operations</strong><span>Run validation, deploy, smoke test, and explain day-2 controls.</span></div></div>
+          <div class="run"><div class="tm">33–40</div><div class="rb"><strong>Security model</strong><span>Cover least privilege, audit path, and governance gates.</span></div></div>
+          <div class="run"><div class="tm">40–45</div><div class="rb"><strong>Decision and next steps</strong><span>Agree pilot scope, success criteria, and owner matrix.</span></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Customer briefing (25 minutes)</h4>
+        <div class="runsheet">
+          <div class="run"><div class="tm">0–5</div><div class="rb"><strong>Value story</strong><span>From "who are our guests" to "who can access what and why" in one system.</span></div></div>
+          <div class="run"><div class="tm">5–12</div><div class="rb"><strong>Trust story</strong><span>Infrastructure first, privilege gate, auditable runtime, governed outputs.</span></div></div>
+          <div class="run"><div class="tm">12–19</div><div class="rb"><strong>Execution story</strong><span>Deploy button, scripted runbooks, smoke tests, and dashboard outcomes.</span></div></div>
+          <div class="run"><div class="tm">19–25</div><div class="rb"><strong>Pilot commitment</strong><span>Define pilot environment, timeline, and executive success criteria.</span></div></div>
+        </div>
+
+        <div class="callout good">
+          <span class="lbl">Three lines to land every room</span>
+          <ul class="tight">
+            <li>We are not only collecting permissions; we are resolving effective access with evidence.</li>
+            <li>We separate deployment from privileged grants to reduce risk and increase audit trust.</li>
+            <li>The same package supports engineering depth and executive clarity.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="objections">
+      <h2>Objection handling — plain English answers</h2>
+      <p class="lede">Use these answers directly in live conversations.</p>
+      <div class="card">
+        <div class="qa"><div class="q">Is RBAC enough to know guest access?</div><div class="a">RBAC is foundational and authoritative for Azure management-plane access. We add directory transitivity, deny assignments, PIM state, and optional service data-plane signals so the final view reflects real effective access, not partial access.</div></div>
+        <div class="qa"><div class="q">Do we need the runtime container if we have an agent?</div><div class="a">Yes. The agent is the control plane (trigger and status). The runtime container/job is the data engine that performs heavy collection and resolution at enterprise scale.</div></div>
+        <div class="qa"><div class="q">Can this run in production safely?</div><div class="a">Yes, with least-privilege identity grants and change-control gates. We included validation, smoke tests, and operations runbooks specifically to support safe production operation.</div></div>
+        <div class="qa"><div class="q">How quickly can we pilot this with a customer?</div><div class="a">Typically one to two weeks for bootstrap, identity approvals, runtime onboarding, and first dashboard cycle, depending on approval lead times.</div></div>
+        <div class="qa"><div class="q">What is the biggest implementation risk?</div><div class="a">Under-scoped permissions or skipped governance gates. Both lead to partial visibility or failed runs. This package addresses that risk with explicit staged deployment and validation scripts.</div></div>
+      </div>
+    </section>
+
+    <section id="rollout">
+      <h2>30-day rollout plan</h2>
+      <p class="lede">A practical adoption timeline for internal and customer teams.</p>
+      <div class="card">
+        <div class="timeline">
+          <div class="tl-step">
+            <div class="yr">Week 1</div>
+            <div class="ttl">Bootstrap and validate</div>
+            <div class="dsc">Run template validation, deploy bootstrap, and complete smoke tests.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Week 2</div>
+            <div class="ttl">Identity grants and runtime onboarding</div>
+            <div class="dsc">Apply approvals, deploy runtime, complete first end-to-end run.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Week 3</div>
+            <div class="ttl">Dashboard and operations readiness</div>
+            <div class="dsc">Publish dashboards, define KPIs, and finalize operational responsibilities.</div>
+          </div>
+          <div class="tl-step">
+            <div class="yr">Week 4</div>
+            <div class="ttl">Customer pilot kickoff</div>
+            <div class="dsc">Run customer briefing, agree success criteria, and launch monitored pilot.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>Source documents in this repository</h2>
+      <p class="lede">Use these references for deeper technical details.</p>
+      <div class="card">
+        <ul class="tight">
+          <li><a class="ref" href="guest-permissions-deploy-to-azure.md">Deployment runbook</a></li>
+          <li><a class="ref" href="guest-permissions-architecture.md">Architecture guide</a></li>
+          <li><a class="ref" href="guest-permissions-security-governance.md">Security and governance guide</a></li>
+          <li><a class="ref" href="guest-permissions-operations-runbook.md">Operations runbook</a></li>
+          <li><a class="ref" href="guest-permissions-demo-playbook.md">Demo playbook</a></li>
+          <li><a class="ref" href="../templates/azuredeploy/guest-permissions-solution-explained.md">Template explained</a></li>
+        </ul>
+        <div class="callout">
+          <span class="lbl">Presenter tip</span>
+          Open this HTML in one tab, keep the deployment runbook in a second tab, and keep the dashboard in a third tab for a clean live walkthrough.
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Guest Permissions Command Center — Field Briefing · Enterprise edition · Internal and customer demo support
+    </footer>
+  </main>
+</div>
+
+<script>
+  const sections = Array.from(document.querySelectorAll("section[id]"));
+  const links = Array.from(document.querySelectorAll("nav a"));
+  const byHash = {};
+
+  links.forEach((link) => {
+    byHash[link.getAttribute("href").slice(1)] = link;
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        links.forEach((link) => link.classList.remove("active"));
+        const active = byHash[entry.target.id];
+        if (active) {
+          active.classList.add("active");
+        }
+      }
+    });
+  }, { rootMargin: "-10% 0px -80% 0px", threshold: 0 });
+
+  sections.forEach((section) => observer.observe(section));
+
+  links.forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      const id = link.getAttribute("href").slice(1);
+      const target = document.getElementById(id);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
+</script>
+</body>
+</html>
