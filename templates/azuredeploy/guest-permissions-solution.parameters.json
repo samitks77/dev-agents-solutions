@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus2"
+    },
+    "managedIdentityName": {
+      "value": "mi-guest-permissions"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "law-guest-permissions"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "cae-guest-permissions"
+    },
+    "grafanaName": {
+      "value": "amg-guest-permissions"
+    },
+    "fileShareName": {
+      "value": "guest-permissions"
+    },
+    "grafanaOperatorObjectId": {
+      "value": ""
+    }
+  }
+}
