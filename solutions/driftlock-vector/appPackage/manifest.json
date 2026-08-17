@@ -1,0 +1,40 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
+    "manifestVersion": "1.29",
+    "version": "1.0.0",
+    "id": "${{TEAMS_APP_ID}}",
+    "developer": {
+        "name": "SecOps Squad",
+        "websiteUrl": "https://github.com/singamit_microsoft/secops-squad-starter-kit",
+        "privacyUrl": "https://github.com/singamit_microsoft/secops-squad-starter-kit/blob/main/README.md",
+        "termsOfUseUrl": "https://github.com/singamit_microsoft/secops-squad-starter-kit/blob/main/README.md"
+    },
+    "icons": {
+        "color": "color.png",
+        "outline": "outline.png"
+    },
+    "name": {
+        "short": "GuestPermOps${{APP_NAME_SUFFIX}}",
+        "full": "Guest Permissions Orchestrator Agent"
+    },
+    "description": {
+        "short": "Run guest permission scans and investigate Entra + Azure access risk.",
+        "full": "Orchestrates guest-permissions pipeline runs, execution health, telemetry queries, and Grafana navigation for Entra and Azure IAM investigations."
+    },
+    "accentColor": "#FFFFFF",
+    "supportsChannelFeatures": "tier1",
+    "composeExtensions": [],
+    "permissions": [
+        "identity",
+        "messageTeamMembers"
+    ],
+    "copilotAgents": {
+        "declarativeAgents": [            
+            {
+                "id": "declarativeAgent",
+                "file": "declarativeAgent.json"
+            }
+        ]
+    },
+    "validDomains": []
+}

@@ -1,0 +1,44 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Telemetry Query Result",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "Container",
+      "$data": "${tables}",
+      "separator": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Table: ${if(name, name, 'N/A')}",
+          "weight": "Bolder",
+          "wrap": true
+        },
+        {
+          "type": "TextBlock",
+          "text": "Columns: ${if(columns, jsonStringify(columns), '[]')}",
+          "isSubtle": true,
+          "wrap": true
+        },
+        {
+          "type": "Container",
+          "$data": "${rows}",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "Row: ${jsonStringify($data)}",
+              "wrap": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

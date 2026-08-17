@@ -1,0 +1,34 @@
+{
+    "version": "v1.8",
+    "name": "Guest Permissions Orchestrator${{APP_NAME_SUFFIX}}",
+    "description": "Runs and investigates guest-permission discovery across Entra and Azure by orchestrating pipeline runs, telemetry queries, and dashboard pivots.",
+    "instructions": "$[file('instruction.txt')]",
+    "conversation_starters": [
+        {
+            "title": "Run Pipeline Now",
+            "text": "Start a fresh guest-permissions pipeline run for rg-entra-permissions and confirm the execution ID."
+        },
+        {
+            "title": "Check Run Health",
+            "text": "Show the latest guest-permissions pipeline executions and flag any failed or long-running runs."
+        },
+        {
+            "title": "Explain One Guest",
+            "text": "Query telemetry for one guest user and summarize Entra permissions plus Azure resource permissions."
+        },
+        {
+            "title": "Open Dashboard",
+            "text": "Get the Grafana endpoint and give me the direct dashboard link for the Guest Permissions Command Center."
+        }
+    ],
+    "actions": [
+        {
+            "id": "action_1",
+            "file": "ai-plugin.json"
+        }
+    ],
+    "disclaimer": {
+        "text": "This agent orchestrates control-plane scans and telemetry. Verify destructive remediation changes through your IAM approval workflow."
+    },
+    "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.8/schema.json"
+}

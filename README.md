@@ -132,13 +132,18 @@ flowchart LR
 │   ├── deploy-guest-permissions-bootstrap.ps1 # Idempotent deployment wrapper
 │   ├── validate-guest-permissions-bootstrap.ps1 # Local + Azure validation
 │   └── post-deploy-smoke-test.ps1             # Post-deploy health checks
-└── templates/
-    ├── README.md
-    └── azuredeploy/
-        ├── README.md                           # Template usage and parameter guide
-        ├── guest-permissions-solution.json     # ARM bootstrap template
-        ├── guest-permissions-solution.parameters.json
-        └── guest-permissions-solution-explained.md # Resource-by-resource rationale
+├── templates/
+│   ├── README.md
+│   └── azuredeploy/
+│       ├── README.md                           # Template usage and parameter guide
+│       ├── guest-permissions-solution.json     # ARM bootstrap template
+│       ├── guest-permissions-solution.parameters.json
+│       └── guest-permissions-solution-explained.md # Resource-by-resource rationale
+└── solutions/
+    └── driftlock-vector/                       # M365 Copilot declarative agent surface (self-contained)
+        ├── m365agents.yml / m365agents.local.yml
+        ├── appPackage/                          # Declarative agent + API plugin manifest
+        └── api/                                 # Control-plane OpenAPI spec used by the agent
 ```
 
 ---

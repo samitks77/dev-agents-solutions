@@ -1,0 +1,259 @@
+openapi: 3.0.4
+info:
+  title: Guest Permissions Control Plane API - Subset
+  description: "API surface to trigger and inspect guest-permissions pipeline runs and query telemetry from Log Analytics.\n"
+  version: 1.0.0
+servers:
+  - url: https://management.azure.com
+paths:
+  '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.App/jobs/{jobName}/start':
+    post:
+      summary: Start a guest-permissions pipeline run
+      description: Triggers a new execution of a Container Apps Job.
+      operationId: startGuestPermissionsPipelineRun
+      parameters:
+        - name: subscriptionId
+          in: path
+          description: Azure subscription ID.
+          required: true
+          schema:
+            type: string
+        - name: resourceGroupName
+          in: path
+          description: Azure resource group name.
+          required: true
+          schema:
+            type: string
+        - name: jobName
+          in: path
+          description: Container Apps Job name.
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: query
+          description: ARM API version for Container Apps jobs.
+          required: true
+          schema:
+            type: string
+            default: '2024-03-01'
+      responses:
+        '200':
+          description: Pipeline run started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+        '202':
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+  '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.App/jobs/{jobName}/executions':
+    get:
+      summary: List guest-permissions pipeline executions
+      description: Returns the execution history for the Container Apps Job.
+      operationId: listGuestPermissionsPipelineExecutions
+      parameters:
+        - name: subscriptionId
+          in: path
+          description: Azure subscription ID.
+          required: true
+          schema:
+            type: string
+        - name: resourceGroupName
+          in: path
+          description: Azure resource group name.
+          required: true
+          schema:
+            type: string
+        - name: jobName
+          in: path
+          description: Container Apps Job name.
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: query
+          description: ARM API version for Container Apps jobs.
+          required: true
+          schema:
+            type: string
+            default: '2024-03-01'
+      responses:
+        '200':
+          description: Execution list returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        properties:
+                          type: object
+                          properties:
+                            status:
+                              type: string
+                            startTime:
+                              type: string
+                              format: date-time
+                            endTime:
+                              type: string
+                              format: date-time
+  '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.OperationalInsights/workspaces/{workspaceName}/query':
+    post:
+      summary: Run KQL query against pipeline telemetry
+      description: Queries Log Analytics for PIPELINE_* rows and derived IAM summaries.
+      operationId: queryGuestPermissionsTelemetry
+      parameters:
+        - name: subscriptionId
+          in: path
+          description: Azure subscription ID.
+          required: true
+          schema:
+            type: string
+        - name: resourceGroupName
+          in: path
+          description: Azure resource group name.
+          required: true
+          schema:
+            type: string
+        - name: workspaceName
+          in: path
+          description: Log Analytics workspace name.
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: query
+          description: ARM API version for Log Analytics workspace query endpoint.
+          required: true
+          schema:
+            type: string
+            default: '2017-10-01'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - query
+              type: object
+              properties:
+                query:
+                  type: string
+                  description: KQL query string.
+                timespan:
+                  type: string
+                  description: Optional ISO8601 timespan (for example P7D).
+        required: true
+      responses:
+        '200':
+          description: Query results returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        columns:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              type:
+                                type: string
+                        rows:
+                          type: array
+                          items:
+                            type: array
+                            items: { }
+  '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Dashboard/grafana/{grafanaName}':
+    get:
+      summary: Get Grafana workspace metadata
+      description: Returns endpoint and metadata for Azure Managed Grafana workspace.
+      operationId: getGrafanaWorkspaceEndpoint
+      parameters:
+        - name: subscriptionId
+          in: path
+          description: Azure subscription ID.
+          required: true
+          schema:
+            type: string
+        - name: resourceGroupName
+          in: path
+          description: Azure resource group name.
+          required: true
+          schema:
+            type: string
+        - name: grafanaName
+          in: path
+          description: Azure Managed Grafana workspace name.
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: query
+          description: ARM API version for Grafana resource endpoint.
+          required: true
+          schema:
+            type: string
+            default: '2025-08-01'
+      responses:
+        '200':
+          description: Grafana workspace details returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  location:
+                    type: string
+                  properties:
+                    type: object
+                    properties:
+                      endpoint:
+                        type: string
+components:
+  securitySchemes:
+    azureAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+          scopes:
+            https://management.azure.com/user_impersonation: Sign in and call Azure Resource Manager APIs
+security:
+  - azureAuth:
+      - https://management.azure.com/user_impersonation

@@ -1,0 +1,44 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Guest Permissions Execution History",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "Container",
+      "$data": "${$root}",
+      "separator": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "${if(name, name, 'N/A')}",
+          "weight": "Bolder",
+          "wrap": true
+        },
+        {
+          "type": "FactSet",
+          "facts": [
+            {
+              "title": "Status",
+              "value": "${if(properties.status, properties.status, 'N/A')}"
+            },
+            {
+              "title": "Started",
+              "value": "${if(properties.startTime, properties.startTime, 'N/A')}"
+            },
+            {
+              "title": "Ended",
+              "value": "${if(properties.endTime, properties.endTime, 'N/A')}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

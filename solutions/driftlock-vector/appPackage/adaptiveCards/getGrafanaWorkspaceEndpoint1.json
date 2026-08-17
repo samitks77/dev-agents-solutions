@@ -1,0 +1,38 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Grafana Workspace",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        {
+          "title": "Name",
+          "value": "${if(name, name, 'N/A')}"
+        },
+        {
+          "title": "Location",
+          "value": "${if(location, location, 'N/A')}"
+        },
+        {
+          "title": "Endpoint",
+          "value": "${if(properties.endpoint, properties.endpoint, 'N/A')}"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "Open Grafana",
+      "url": "${if(properties.endpoint, properties.endpoint, 'https://portal.azure.com')}"
+    }
+  ]
+}

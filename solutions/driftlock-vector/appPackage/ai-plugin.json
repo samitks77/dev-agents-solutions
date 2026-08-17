@@ -1,0 +1,98 @@
+{
+    "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+    "schema_version": "v2.4",
+    "name_for_human": "GuestPerm Control",
+    "description_for_human": "Run guest-permissions scans, check status, query telemetry, and fetch Grafana endpoint.",
+    "description_for_model": "Use this plugin to orchestrate the guest-permissions pipeline in Azure. Use startGuestPermissionsPipelineRun only when a run is explicitly requested or needed for fresh data. Use listGuestPermissionsPipelineExecutions to report execution health and status history. Use queryGuestPermissionsTelemetry for KQL-based guest IAM analysis. Use getGrafanaWorkspaceEndpoint when the user asks for dashboard access links.",
+    "contact_email": "admin@diax38787588.onmicrosoft.com",
+    "namespace": "guestpermops",
+    "capabilities": {},
+    "functions": [
+        {
+            "name": "getGrafanaWorkspaceEndpoint",
+            "description": "Get Grafana workspace endpoint metadata to build direct dashboard links.",
+            "capabilities": {
+                "response_semantics": {
+                    "data_path": "$",
+                    "properties": {
+                        "title": "$.name",
+                        "subtitle": "$.id"
+                    },
+                    "static_template": {
+                        "file": "adaptiveCards/getGrafanaWorkspaceEndpoint1.json"
+                    }
+                }
+            }
+        },
+        {
+            "name": "listGuestPermissionsPipelineExecutions",
+            "description": "List guest-permissions pipeline executions and statuses for run health reporting.",
+            "capabilities": {
+                "response_semantics": {
+                    "data_path": "$.value",
+                    "properties": {
+                        "title": "$.name",
+                        "subtitle": "$.id"
+                    },
+                    "static_template": {
+                        "file": "adaptiveCards/listGuestPermissionsPipelineExecutions1.json"
+                    }
+                }
+            }
+        },
+        {
+            "name": "queryGuestPermissionsTelemetry",
+            "description": "Run KQL against workspace telemetry to summarize Entra and Azure guest permissions.",
+            "capabilities": {
+                "response_semantics": {
+                    "data_path": "$.tables",
+                    "properties": {
+                        "title": "$.name"
+                    },
+                    "static_template": {
+                        "file": "adaptiveCards/queryGuestPermissionsTelemetry1.json"
+                    }
+                }
+            }
+        },
+        {
+            "name": "startGuestPermissionsPipelineRun",
+            "description": "Start a new guest-permissions pipeline run for fresh IAM telemetry.",
+            "capabilities": {
+                "confirmation": {
+                    "type": "AdaptiveCard",
+                    "title": "Start guest-permissions scan?",
+                    "body": "This launches a new tenant scan and may run for several minutes. Continue?"
+                },
+                "response_semantics": {
+                    "data_path": "$",
+                    "properties": {
+                        "title": "$.name",
+                        "subtitle": "$.id"
+                    },
+                    "static_template": {
+                        "file": "adaptiveCards/startGuestPermissionsPipelineRun1.json"
+                    }
+                }
+            }
+        }
+    ],
+    "runtimes": [
+        {
+            "type": "OpenApi",
+            "auth": {
+                "type": "OAuthPluginVault",
+                "reference_id": "${{AZUREAUTH_REGISTRATION_ID}}"
+            },
+            "spec": {
+                "url": "apiSpecificationFile/openapi.yaml"
+            },
+            "run_for_functions": [
+                "startGuestPermissionsPipelineRun",
+                "listGuestPermissionsPipelineExecutions",
+                "queryGuestPermissionsTelemetry",
+                "getGrafanaWorkspaceEndpoint"
+            ]
+        }
+    ]
+}

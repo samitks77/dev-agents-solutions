@@ -1,0 +1,35 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Guest Permissions Pipeline Triggered",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "A new execution was started successfully.",
+      "isSubtle": true,
+      "spacing": "None",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "separator": true,
+      "facts": [
+        {
+          "title": "Execution name",
+          "value": "${if(name, name, 'N/A')}"
+        },
+        {
+          "title": "Execution resource",
+          "value": "${if(id, id, 'N/A')}"
+        }
+      ]
+    }
+  ]
+}
