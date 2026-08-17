@@ -3,20 +3,20 @@ name: solution-quality
 on:
   push:
     paths:
-      - "README.md"
-      - "docs/**/*.md"
-      - "scripts/*.ps1"
-      - "templates/azuredeploy/*.json"
-      - "templates/azuredeploy/*.md"
-      - "templates/README.md"
+      - "solutions/driftlock-vector/README.md"
+      - "solutions/driftlock-vector/docs/**/*.md"
+      - "solutions/driftlock-vector/scripts/*.ps1"
+      - "solutions/driftlock-vector/templates/azuredeploy/*.json"
+      - "solutions/driftlock-vector/templates/azuredeploy/*.md"
+      - "solutions/driftlock-vector/templates/README.md"
   pull_request:
     paths:
-      - "README.md"
-      - "docs/**/*.md"
-      - "scripts/*.ps1"
-      - "templates/azuredeploy/*.json"
-      - "templates/azuredeploy/*.md"
-      - "templates/README.md"
+      - "solutions/driftlock-vector/README.md"
+      - "solutions/driftlock-vector/docs/**/*.md"
+      - "solutions/driftlock-vector/scripts/*.ps1"
+      - "solutions/driftlock-vector/templates/azuredeploy/*.json"
+      - "solutions/driftlock-vector/templates/azuredeploy/*.md"
+      - "solutions/driftlock-vector/templates/README.md"
 
 jobs:
   validate-json:
@@ -27,8 +27,8 @@ jobs:
 
       - name: Validate ARM JSON files parse
         run: |
-          python -m json.tool templates/azuredeploy/guest-permissions-solution.json > /dev/null
-          python -m json.tool templates/azuredeploy/guest-permissions-solution.parameters.json > /dev/null
+          python -m json.tool solutions/driftlock-vector/templates/azuredeploy/guest-permissions-solution.json > /dev/null
+          python -m json.tool solutions/driftlock-vector/templates/azuredeploy/guest-permissions-solution.parameters.json > /dev/null
 
   validate-powershell:
     runs-on: ubuntu-latest
@@ -39,7 +39,7 @@ jobs:
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |
-          $scripts = Get-ChildItem -Path scripts -Filter *.ps1
+          $scripts = Get-ChildItem -Path solutions/driftlock-vector/scripts -Filter *.ps1
           foreach ($script in $scripts) {
             Write-Host "Parsing $($script.FullName)"
             $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $script.FullName -Raw), [ref]$null)

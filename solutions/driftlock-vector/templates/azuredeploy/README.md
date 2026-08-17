@@ -10,7 +10,7 @@
 
 ### Option 1: Deploy to Azure button
 
-Use the button in the root `README.md`.
+Use the button in the solution's [`README.md`](../../README.md).
 
 ### Option 2: Azure CLI
 
@@ -48,7 +48,7 @@ az deployment group create \
 
 ## Validation Guidance
 
-Before deploying:
+Before deploying (commands below assume you're in `solutions/driftlock-vector/`):
 
 1. Run `scripts/validate-guest-permissions-bootstrap.ps1`
 2. Confirm parameter values for your environment naming standards

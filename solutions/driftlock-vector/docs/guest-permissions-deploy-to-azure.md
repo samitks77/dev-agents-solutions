@@ -64,7 +64,7 @@ This creates the minimum enterprise platform layer required for secure operation
 
 ### Option A — Deploy button
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Ftemplates%2Fazuredeploy%2Fguest-permissions-solution.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Fsolutions%2Fdriftlock-vector%2Ftemplates%2Fazuredeploy%2Fguest-permissions-solution.json)
 
 ### Option B — Scripted deployment (recommended for repeatability)
 
