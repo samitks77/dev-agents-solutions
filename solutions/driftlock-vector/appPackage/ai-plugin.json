@@ -4,7 +4,7 @@
     "name_for_human": "GuestPerm Control",
     "description_for_human": "Run guest-permissions scans, check status, query telemetry, and fetch Grafana endpoint.",
     "description_for_model": "Use this plugin to orchestrate the guest-permissions pipeline in Azure. Use startGuestPermissionsPipelineRun only when a run is explicitly requested or needed for fresh data. Use listGuestPermissionsPipelineExecutions to report execution health and status history. Use queryGuestPermissionsTelemetry for KQL-based guest IAM analysis. Use getGrafanaWorkspaceEndpoint when the user asks for dashboard access links.",
-    "contact_email": "admin@diax38787588.onmicrosoft.com",
+    "contact_email": "security@example.com",
     "namespace": "guestpermops",
     "capabilities": {},
     "functions": [

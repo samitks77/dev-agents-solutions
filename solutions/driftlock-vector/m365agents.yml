@@ -98,4 +98,3 @@ publish:
     writeToEnvironmentFile:
       titleId: M365_PUBLISHED_TITLE_ID
       appId: M365_PUBLISHED_APP_ID
-projectId: bc8d10d1-6010-4e7b-8f52-a1cb340d8bd2
