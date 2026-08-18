@@ -3,8 +3,8 @@
     "schema_version": "v2.4",
     "name_for_human": "GuestPerm Control",
     "description_for_human": "Run guest-permissions scans, check status, query telemetry, and fetch Grafana endpoint.",
-    "description_for_model": "Use this plugin to orchestrate the guest-permissions pipeline in Azure. Use startGuestPermissionsPipelineRun only when a run is explicitly requested or needed for fresh data. Use listGuestPermissionsPipelineExecutions to report execution health and status history. Use queryGuestPermissionsTelemetry for KQL-based guest IAM analysis. Use getGrafanaWorkspaceEndpoint when the user asks for dashboard access links.",
-    "contact_email": "admin@diax38787588.onmicrosoft.com",
+    "description_for_model": "Use this plugin to orchestrate the guest-permissions pipeline in Azure. Use startGuestPermissionsPipelineRun only when a run is explicitly requested or needed for fresh data. Use listGuestPermissionsPipelineExecutions to report execution health and status history. Use queryGuestPermissionsTelemetry for KQL-based guest IAM analysis. Use getGrafanaWorkspaceEndpoint when the user asks for dashboard access links. Use checkGuestEffectiveAccess whenever the user asks to verify a guest's real enforced access for specific actions, especially when a deny assignment might apply — telemetry only reports assigned roles, not live enforcement.",
+    "contact_email": "admin@example.onmicrosoft.com",
     "namespace": "guestpermops",
     "capabilities": {},
     "functions": [
@@ -75,6 +75,22 @@
                     }
                 }
             }
+        },
+        {
+            "name": "checkGuestEffectiveAccess",
+            "description": "Authoritatively check whether a specific guest is Allowed or Denied for specific control-plane or data-plane actions at a resource-group scope, using Azure's live Check Access decision engine (accounts for deny assignments and active RBAC role precedence). Use this whenever telemetry alone cannot resolve whether a deny assignment is actually being enforced.",
+            "capabilities": {
+                "response_semantics": {
+                    "data_path": "$",
+                    "properties": {
+                        "title": "$[0].actionId",
+                        "subtitle": "$[0].accessDecision"
+                    },
+                    "static_template": {
+                        "file": "adaptiveCards/checkGuestEffectiveAccess1.json"
+                    }
+                }
+            }
         }
     ],
     "runtimes": [
@@ -91,7 +107,8 @@
                 "startGuestPermissionsPipelineRun",
                 "listGuestPermissionsPipelineExecutions",
                 "queryGuestPermissionsTelemetry",
-                "getGrafanaWorkspaceEndpoint"
+                "getGrafanaWorkspaceEndpoint",
+                "checkGuestEffectiveAccess"
             ]
         }
     ]

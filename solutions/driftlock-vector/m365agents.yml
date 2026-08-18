@@ -20,7 +20,10 @@ provision:
     with:
       name: guest-permissions-orchestrator-oauth${{APP_NAME_SUFFIX}}
       generateClientSecret: true
-      signInAudience: AzureADMyOrg
+      # Must be multi-tenant: Copilot authenticates OAuth plugin connections
+      # via the /common endpoint regardless of your actual tenant. A
+      # single-tenant (AzureADMyOrg) app rejects that with AADSTS50194.
+      signInAudience: AzureADMultipleOrgs
     writeToEnvironmentFile:
       clientId: AZUREAUTH_CLIENT_ID
       objectId: AZUREAUTH_AAD_APP_OBJECT_ID

@@ -1,0 +1,50 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Check Access Result",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "Live Azure enforcement decision, not pipeline telemetry.",
+      "isSubtle": true,
+      "spacing": "None",
+      "wrap": true
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "$data": "${$root}",
+      "items": [
+        {
+          "type": "FactSet",
+          "separator": true,
+          "facts": [
+            {
+              "title": "Action",
+              "value": "${if(actionId, actionId, 'N/A')}"
+            },
+            {
+              "title": "Decision",
+              "value": "${if(accessDecision, accessDecision, 'N/A')}"
+            },
+            {
+              "title": "Data action?",
+              "value": "${if(isDataAction, 'Yes', 'No')}"
+            },
+            {
+              "title": "Deny assignment",
+              "value": "${if(denyAssignment.name, denyAssignment.name, 'None')}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

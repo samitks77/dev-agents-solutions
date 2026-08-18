@@ -244,6 +244,114 @@ paths:
                     properties:
                       endpoint:
                         type: string
+  '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Authorization/checkAccess':
+    post:
+      summary: Authoritatively check a guest's effective access for specific actions
+      description: >-
+        Calls Azure's real-time Check Access decision engine to determine whether a
+        specific guest principal is actually Allowed or Denied for specific control-plane
+        or data-plane actions at a resource-group scope. Unlike pipeline telemetry (which
+        only reports assigned RBAC roles), this reflects deny assignments, PIM activation
+        state, and role precedence exactly as Azure enforces them right now.
+      operationId: checkGuestEffectiveAccess
+      parameters:
+        - name: subscriptionId
+          in: path
+          description: Azure subscription ID.
+          required: true
+          schema:
+            type: string
+        - name: resourceGroupName
+          in: path
+          description: Azure resource group name.
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: query
+          description: ARM API version for the Microsoft.Authorization checkAccess endpoint.
+          required: true
+          schema:
+            type: string
+            default: '2018-09-01-preview'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - Subject
+                - Actions
+              properties:
+                Subject:
+                  type: object
+                  description: Identifies the guest principal to check access for.
+                  properties:
+                    Attributes:
+                      type: object
+                      properties:
+                        ObjectId:
+                          type: string
+                          description: The guest's Entra object ID (guestPrincipalId from telemetry).
+                Actions:
+                  type: array
+                  description: The specific control-plane or data-plane actions to evaluate.
+                  items:
+                    type: object
+                    properties:
+                      Id:
+                        type: string
+                        description: 'ARM action string, e.g. Microsoft.Network/networkWatchers/write'
+                      IsDataAction:
+                        type: boolean
+                        description: true for data-plane actions, false for control-plane actions.
+      responses:
+        '200':
+          description: Effective access decision per requested action returned.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    actionId:
+                      type: string
+                    accessDecision:
+                      type: string
+                      description: 'Allowed, Denied, or NotAllowed'
+                    isDataAction:
+                      type: boolean
+                    roleAssignment:
+                      type: object
+                      description: Present only when accessDecision is Allowed via an active role assignment.
+                      properties:
+                        roleDefinitionId:
+                          type: string
+                        principalId:
+                          type: string
+                        scope:
+                          type: string
+                    denyAssignment:
+                      type: object
+                      description: Present only when accessDecision is Denied due to a deny assignment.
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        scope:
+                          type: string
+                        principals:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                              type:
+                                type: string
 components:
   securitySchemes:
     azureAuth:

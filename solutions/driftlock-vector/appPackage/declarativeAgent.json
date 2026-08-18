@@ -5,20 +5,52 @@
     "instructions": "$[file('instruction.txt')]",
     "conversation_starters": [
         {
-            "title": "Run Pipeline Now",
+            "title": "🟢 L100: Open Dashboard",
+            "text": "Get the Grafana endpoint and give me the direct dashboard link for the Guest Permissions Command Center."
+        },
+        {
+            "title": "🟢 L100: Latest Run Status",
+            "text": "What was the status of the most recent guest-permissions pipeline run?"
+        },
+        {
+            "title": "🟢 L100: What Can You Do",
+            "text": "In plain language, what can you help me investigate about guest access?"
+        },
+        {
+            "title": "🔵 L200: Run Pipeline Now",
             "text": "Start a fresh guest-permissions pipeline run for rg-entra-permissions and confirm the execution ID."
         },
         {
-            "title": "Check Run Health",
-            "text": "Show the latest guest-permissions pipeline executions and flag any failed or long-running runs."
+            "title": "🔵 L200: Check Run Health",
+            "text": "Show the last 5 pipeline executions and flag any that failed or ran too long."
         },
         {
-            "title": "Explain One Guest",
-            "text": "Query telemetry for one guest user and summarize Entra permissions plus Azure resource permissions."
+            "title": "🔵 L200: Explain One Guest",
+            "text": "Query telemetry for one guest user and summarize their Entra permissions plus Azure resource permissions."
         },
         {
-            "title": "Open Dashboard",
-            "text": "Get the Grafana endpoint and give me the direct dashboard link for the Guest Permissions Command Center."
+            "title": "🟠 L300: Compare Two Guests",
+            "text": "Compare two guests' effective access and tell me specifically which one holds their role directly and which one inherits it through a group."
+        },
+        {
+            "title": "🟠 L300: Run Then Verify",
+            "text": "Run the pipeline, then cross-reference the new execution's run ID against telemetry to confirm the data actually refreshed."
+        },
+        {
+            "title": "🟠 L300: PIM vs Active",
+            "text": "For a given guest, tell me whether their highest-privilege role is currently active or only PIM-eligible, and what activating it would require."
+        },
+        {
+            "title": "🔴 L400: Risk Ranking",
+            "text": "Across all current guests, which one has the broadest effective access and which has the narrowest? Justify the ranking using scope breadth, role power, and whether access is direct, inherited, or eligible."
+        },
+        {
+            "title": "🔴 L400: Deny Logic Limits",
+            "text": "If a guest has a role assignment and a matching deny assignment at the same scope, what can you actually detect from telemetry versus what requires a separate Azure RBAC check-access call? Be explicit about the limitation."
+        },
+        {
+            "title": "🔴 L400: KQL Deep Dive",
+            "text": "Query pipeline telemetry for every distinct effective scope type one guest has a role on, with a count of resources per scope type, and flag anything that looks anomalous."
         }
     ],
     "actions": [
