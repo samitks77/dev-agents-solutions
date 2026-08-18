@@ -228,7 +228,7 @@ Install the Microsoft 365 Copilot Agent Evaluations CLI (`@microsoft/m365-copilo
 > Requires [Admin consent](https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md) at tenant level.
 
 1. Run `npm install -g @microsoft/m365-copilot-eval`
-2. Add the following environment variables. See [here](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/evaluations-cli-get-env-values#get-your-azure-openai-endpoint-and-api-key) on how to get them.
+2. Add the following environment variables in a local ignored override file (for example `env/.env.dev.local` or `env/.env.dev.user`), not in the tracked `env/.env.dev` template. See [here](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/evaluations-cli-get-env-values#get-your-azure-openai-endpoint-and-api-key) on how to get them.
 
     ```
     AZURE_AI_OPENAI_ENDPOINT=

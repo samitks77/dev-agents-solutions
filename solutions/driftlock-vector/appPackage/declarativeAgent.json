@@ -18,7 +18,7 @@
         },
         {
             "title": "🔵 L200: Run Pipeline Now",
-            "text": "Start a fresh guest-permissions pipeline run for rg-entra-permissions and confirm the execution ID."
+            "text": "Start a fresh guest-permissions pipeline run for my resource group and confirm the execution ID."
         },
         {
             "title": "🔵 L200: Check Run Health",

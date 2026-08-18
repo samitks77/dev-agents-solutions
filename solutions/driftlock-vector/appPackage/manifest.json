@@ -4,9 +4,9 @@
     "version": "1.0.0",
     "id": "${{TEAMS_APP_ID}}",
     "developer": {
-        "name": "Dev Agents Solutions",
+        "name": "dev-agents-solutions maintainers",
         "websiteUrl": "https://github.com/samitks77/dev-agents-solutions",
-        "privacyUrl": "https://github.com/samitks77/dev-agents-solutions/blob/main/README.md",
+        "privacyUrl": "https://github.com/samitks77/dev-agents-solutions/blob/main/SECURITY.md",
         "termsOfUseUrl": "https://github.com/samitks77/dev-agents-solutions/blob/main/README.md"
     },
     "icons": {

@@ -20,12 +20,12 @@ Decision logic:
 3. When the user asks what access a guest has, run telemetry queries and summarize Entra signals separately from Azure resource access signals, then call out eligible, denied, inherited, and DataAction exposure.
 4. When the user asks for dashboard navigation, fetch Grafana workspace metadata and provide the endpoint plus the direct dashboard URL path `/d/secops-guest-permissions-command-center`.
 5. When the user asks to verify real/enforced access for a guest and action (especially with a deny assignment in play), NEVER ask the user for the guest's object ID — first autonomously call queryGuestPermissionsTelemetry and match `PIPELINE_GUEST_PRINCIPAL`/`PIPELINE_GUEST_RESOURCE_ACCESS` rows by `guestDisplayName` to extract `guestPrincipalId`, then call `checkGuestEffectiveAccess` with `Subject.Attributes.ObjectId` = that ID and `Actions` = the specific action(s) (`IsDataAction: true` for data actions). Report `accessDecision` per action; name the `denyAssignment` if Denied or the `roleAssignment` if Allowed. Only ask the user directly if the telemetry lookup itself returns no matching guest.
-6. If required context is missing, ask for it once. Use defaults only when the user has not provided alternatives. Replace placeholders below with your tenant's real IDs before deploying:
-   - subscriptionId: `<YOUR_SUBSCRIPTION_ID>`
-   - resourceGroupName: `rg-entra-permissions`
-   - jobName: `job-entra-permissions`
-   - workspaceName: `workspace-rgentrapermissions1sUD`
-   - grafanaName: `amg-guest-permissions`
+6. If required context is missing, ask for it once. Use these placeholders only as examples when the user has not provided environment-specific values:
+   - subscriptionId: `<subscription-id>`
+   - resourceGroupName: `<resource-group-name>`
+   - jobName: `<container-apps-job-name>`
+   - workspaceName: `<log-analytics-workspace-name>`
+   - grafanaName: `<grafana-name>`
 
 Telemetry KQL schema (mandatory — use this exact schema for queryGuestPermissionsTelemetry, never invent table or column names):
 - The ONLY table is `ContainerAppConsoleLogs_CL`. There is no `PIPELINE_GUEST_PRINCIPAL_CL`, `GuestPermissions`, or any other custom table — using one will fail with a semantic error.
