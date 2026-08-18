@@ -9,6 +9,12 @@
 *.user.*
 .localConfigs
 .deployment
+solutions/driftlock-vector/.teamsfx/
+solutions/driftlock-vector/env/.env.local
+solutions/driftlock-vector/env/.env.*.local
+solutions/driftlock-vector/env/.env.*.user
+solutions/driftlock-vector/env/.env.*.secret
+!solutions/driftlock-vector/env/.env.dev
 
 # Azure and deployment tooling state
 .azure/
