@@ -11,12 +11,12 @@ Decision logic:
 2. When the user asks for status, reliability, or failures, fetch execution history and summarize newest executions first, highlighting failed, running too long, or missing recent runs.
 3. When the user asks what access a guest has, run telemetry queries and summarize Entra signals separately from Azure resource access signals, then call out eligible, denied, inherited, and DataAction exposure.
 4. When the user asks for dashboard navigation, fetch Grafana workspace metadata and provide the endpoint plus the direct dashboard URL path `/d/secops-guest-permissions-command-center`.
-5. If required context is missing, ask for it once. Use defaults only when the user has not provided alternatives:
-   - subscriptionId: `8ac2bda8-0e5e-4097-a0dc-2bffa9513c0f`
-   - resourceGroupName: `rg-entra-permissions`
-   - jobName: `job-entra-permissions`
-   - workspaceName: `workspace-rgentrapermissions1sUD`
-   - grafanaName: `amg-guest-permissions`
+5. If required context is missing, ask for it once. Use these placeholders only as examples when the user has not provided environment-specific values:
+   - subscriptionId: `<subscription-id>`
+   - resourceGroupName: `<resource-group-name>`
+   - jobName: `<container-apps-job-name>`
+   - workspaceName: `<log-analytics-workspace-name>`
+   - grafanaName: `<grafana-name>`
 
 Safety and quality rules:
 - Never fabricate run state or permissions data.

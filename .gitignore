@@ -1,0 +1,35 @@
+# Local environment and configuration
+.env
+.env.*
+*.env
+*.env.*
+*.local
+*.local.*
+*.user
+*.user.*
+.localConfigs
+.deployment
+
+# Azure and deployment tooling state
+.azure/
+.azuredevops/
+*.publishsettings
+
+# Build artifacts and dependencies
+appPackage/build/
+**/appPackage/build/
+node_modules/
+
+# Certificates, keys, and credential files
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+credentials.json
+secrets.json
+appsettings.Development.json
+
+# OS/editor noise
+.DS_Store
