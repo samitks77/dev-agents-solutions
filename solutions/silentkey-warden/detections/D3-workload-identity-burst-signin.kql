@@ -1,0 +1,52 @@
+// =====================================================================================
+// D3 - Workload identity multi-resource burst sign-in (lateral movement)
+// -------------------------------------------------------------------------------------
+// Maps to  : POC Test D - Multi-Resource Burst Sign-In
+// Table    : AADServicePrincipalSignInLogs  (diagnostic category: ServicePrincipalSignInLogs)
+// Severity : 2 (Warning)
+// MITRE    : T1078 (Valid Accounts) + T1087 (Account Discovery)
+// -------------------------------------------------------------------------------------
+// What it finds
+//   A single service principal that authenticated to an unusual number of DISTINCT
+//   resources inside a 10 minute window - Graph, ARM, Key Vault, Storage, SQL, Power BI,
+//   Fabric, and so on.
+//
+// Why it matters
+//   A legitimate workload identity is provisioned for a job and touches one or two
+//   resources forever. An attacker holding a stolen credential does not know what it can
+//   reach, so they enumerate. The shape of that enumeration - many resources, seconds
+//   apart, from one identity - is what this catches. No agent or sensor required; it is
+//   pure token issuance telemetry, so it is invisible to the attacker.
+//
+// Tuning
+//   ResourceThreshold is the only knob. Start at 4. Raise it if you run legitimate
+//   orchestrators (backup, CSPM scanners, cost tools) that legitimately fan out; better
+//   still, exclude those AppIds explicitly with the KnownFanOutApps line below.
+//
+// Triage
+//   1. Do the resources form a coherent job, or do they look like a shopping list?
+//   2. Same source IP for all of them, or spread?
+//   3. Cross-check the AppId against D1 - a burst shortly after a credential addition
+//      is the classic compromise sequence.
+// =====================================================================================
+
+let Lookback = 24h;
+let BurstWindow = 10m;
+let ResourceThreshold = 4;
+// Add the AppIds of sanctioned fan-out identities here to suppress known-good noise.
+let KnownFanOutApps = dynamic([]);
+AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(Lookback)
+| where ResultType == 0
+| where AppId !in (KnownFanOutApps)
+| summarize
+    DistinctResources = dcount(ResourceDisplayName),
+    Resources         = make_set(ResourceDisplayName, 20),
+    SignIns           = count(),
+    FirstSeen         = min(TimeGenerated),
+    LastSeen          = max(TimeGenerated),
+    SourceIPs         = make_set(IPAddress, 10)
+    by ServicePrincipalName, ServicePrincipalId, AppId, BurstBin = bin(TimeGenerated, BurstWindow)
+| where DistinctResources >= ResourceThreshold
+| extend BurstDurationSeconds = datetime_diff('second', LastSeen, FirstSeen)
+| order by DistinctResources desc, BurstDurationSeconds asc

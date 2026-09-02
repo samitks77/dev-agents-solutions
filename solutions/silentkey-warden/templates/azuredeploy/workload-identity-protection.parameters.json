@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": {
+      "value": "silentkey"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "law-silentkey-warden"
+    },
+    "retentionInDays": {
+      "value": 90
+    },
+    "dailyQuotaGb": {
+      "value": -1
+    },
+    "socEmailAddress": {
+      "value": ""
+    },
+    "deployAlertRules": {
+      "value": true
+    },
+    "deployWorkbook": {
+      "value": true
+    },
+    "alertEvaluationFrequency": {
+      "value": "PT15M"
+    },
+    "alertWindowSize": {
+      "value": "PT1H"
+    },
+    "burstResourceThreshold": {
+      "value": 4
+    },
+    "tagValues": {
+      "value": {
+        "solution": "silentkey-warden",
+        "workload": "workload-identity-protection",
+        "managedBy": "dev-agents-solutions"
+      }
+    }
+  }
+}

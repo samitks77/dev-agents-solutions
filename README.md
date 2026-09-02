@@ -9,6 +9,10 @@ This repo is organized as a collection of **self-contained solutions**. Each sol
 | Solution | Description |
 |---|---|
 | [`solutions/driftlock-vector/`](solutions/driftlock-vector/README.md) | **Guest Permissions Solution (Azure + M365).** Discovers guest users, resolves effective Entra + Azure access, and exposes it through Copilot Studio, Security Copilot, and an M365 Copilot declarative agent. Includes the Azure infra bootstrap (ARM templates, deploy/validate/smoke-test scripts), runbooks, and the declarative agent app package. |
+| [`solutions/silentkey-warden/`](solutions/silentkey-warden/README.md) | **Workload Identity Protection (Entra + Azure Monitor).** Brings adaptive protection to service principals and managed identities. Turns the five manual Workload Identity Protection POC tests into standing production detections: an ARM-deployed Log Analytics workspace, six KQL detections mapped to MITRE, an Azure Monitor workbook, a report-only Conditional Access policy, an end-to-end risk simulation script, and an interactive POC guide. |
+
+The two solutions are complementary. `driftlock-vector` answers **what an identity is entitled to
+do**; `silentkey-warden` answers **what it just did**.
 
 See each solution's README for its own architecture diagram, deploy-to-Azure button, quick start, and repository map.
 
@@ -17,7 +21,8 @@ See each solution's README for its own architecture diagram, deploy-to-Azure but
 ```text
 .
 ├── .github/workflows/
-│   └── solution-quality.yml   # CI checks scoped to solutions/driftlock-vector
+│   └── solution-quality.yml   # CI checks across every solution under solutions/
 └── solutions/
-    └── driftlock-vector/       # Guest Permissions Solution — fully self-contained
+    ├── driftlock-vector/       # Guest Permissions Solution — fully self-contained
+    └── silentkey-warden/       # Workload Identity Protection — fully self-contained
 ```

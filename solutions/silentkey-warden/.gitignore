@@ -1,0 +1,17 @@
+# Local deployment artifacts
+*.deployment.json
+deployment-outputs/
+
+# Secrets - never commit these
+*.secret
+*.secrets.json
+.env
+env/.env.*.user
+env/.env.local
+
+# Parameter overrides containing tenant-specific values
+*.parameters.local.json
+*.parameters.*.local.json
+
+# misc
+.DS_Store

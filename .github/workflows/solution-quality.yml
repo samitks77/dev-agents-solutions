@@ -3,20 +3,24 @@ name: solution-quality
 on:
   push:
     paths:
-      - "solutions/driftlock-vector/README.md"
-      - "solutions/driftlock-vector/docs/**/*.md"
-      - "solutions/driftlock-vector/scripts/*.ps1"
-      - "solutions/driftlock-vector/templates/azuredeploy/*.json"
-      - "solutions/driftlock-vector/templates/azuredeploy/*.md"
-      - "solutions/driftlock-vector/templates/README.md"
+      - "solutions/**/README.md"
+      - "solutions/**/docs/**/*.md"
+      - "solutions/**/detections/**"
+      - "solutions/**/policies/*.json"
+      - "solutions/**/scripts/*.ps1"
+      - "solutions/**/templates/**/*.json"
+      - "solutions/**/templates/**/*.md"
+      - ".github/workflows/solution-quality.yml"
   pull_request:
     paths:
-      - "solutions/driftlock-vector/README.md"
-      - "solutions/driftlock-vector/docs/**/*.md"
-      - "solutions/driftlock-vector/scripts/*.ps1"
-      - "solutions/driftlock-vector/templates/azuredeploy/*.json"
-      - "solutions/driftlock-vector/templates/azuredeploy/*.md"
-      - "solutions/driftlock-vector/templates/README.md"
+      - "solutions/**/README.md"
+      - "solutions/**/docs/**/*.md"
+      - "solutions/**/detections/**"
+      - "solutions/**/policies/*.json"
+      - "solutions/**/scripts/*.ps1"
+      - "solutions/**/templates/**/*.json"
+      - "solutions/**/templates/**/*.md"
+      - ".github/workflows/solution-quality.yml"
 
 jobs:
   validate-json:
@@ -25,10 +29,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate ARM JSON files parse
+      - name: Validate every solution JSON file parses
         run: |
-          python -m json.tool solutions/driftlock-vector/templates/azuredeploy/guest-permissions-solution.json > /dev/null
-          python -m json.tool solutions/driftlock-vector/templates/azuredeploy/guest-permissions-solution.parameters.json > /dev/null
+          set -euo pipefail
+          found=0
+          while IFS= read -r file; do
+            echo "Parsing $file"
+            python -m json.tool "$file" > /dev/null
+            found=$((found + 1))
+          done < <(find solutions -type f -name '*.json' \
+                     \( -path '*/templates/*' -o -path '*/policies/*' \))
+          if [ "$found" -eq 0 ]; then
+            echo "No JSON files found to validate."
+            exit 1
+          fi
+          echo "Validated $found JSON file(s)."
 
   validate-powershell:
     runs-on: ubuntu-latest
@@ -39,8 +54,61 @@ jobs:
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |
-          $scripts = Get-ChildItem -Path solutions/driftlock-vector/scripts -Filter *.ps1
+          $scripts = Get-ChildItem -Path solutions -Recurse -Filter *.ps1 |
+                     Where-Object { $_.FullName -match '[\\/]scripts[\\/]' }
+          if ($scripts.Count -eq 0) {
+            Write-Error "No PowerShell scripts found to validate."
+            exit 1
+          }
+          $failed = 0
           foreach ($script in $scripts) {
             Write-Host "Parsing $($script.FullName)"
-            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $script.FullName -Raw), [ref]$null)
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $script.FullName, [ref]$null, [ref]$parseErrors)
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+              $failed++
+              foreach ($parseError in $parseErrors) {
+                Write-Host "::error file=$($script.FullName),line=$($parseError.Extent.StartLineNumber)::$($parseError.Message)"
+              }
+            }
           }
+          if ($failed -gt 0) {
+            Write-Error "$failed script(s) failed to parse."
+            exit 1
+          }
+          Write-Host "Parsed $($scripts.Count) script(s) successfully."
+
+  validate-links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check relative markdown links resolve
+        shell: pwsh
+        run: |
+          $docs = @(Get-ChildItem -Path ./solutions -Recurse -Filter *.md) + @(Get-Item ./README.md)
+          if ($docs.Count -eq 0) {
+            Write-Error "No markdown files found to validate."
+            exit 1
+          }
+          $broken = 0
+          $checked = 0
+          foreach ($doc in $docs) {
+            $content = Get-Content -LiteralPath $doc.FullName -Raw
+            foreach ($match in [regex]::Matches($content, '\[[^\]]*\]\(([^)#:]+?)(?:#[^)]*)?\)')) {
+              $target = $match.Groups[1].Value.Trim()
+              if ($target -match '^(https?:|mailto:)') { continue }
+              $checked++
+              if (-not (Test-Path -LiteralPath (Join-Path $doc.DirectoryName $target))) {
+                $broken++
+                Write-Host "::error file=$($doc.FullName)::Broken relative link -> $target"
+              }
+            }
+          }
+          if ($broken -gt 0) {
+            Write-Error "$broken broken relative link(s) found out of $checked checked."
+            exit 1
+          }
+          Write-Host "All $checked relative links resolve."

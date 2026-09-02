@@ -1,0 +1,48 @@
+// =====================================================================================
+// D2 - Risky workload identity detected (High or Medium)
+// -------------------------------------------------------------------------------------
+// Maps to  : POC Test A - Admin Confirms SP Compromised (and the end-state of C and D)
+// Table    : AADServicePrincipalRiskEvents   (diagnostic category: ServicePrincipalRiskEvents)
+// Severity : 1 (Error)
+// -------------------------------------------------------------------------------------
+// What it finds
+//   Every High or Medium risk detection Entra ID Protection has raised against a
+//   service principal, excluding ones already remediated or dismissed.
+//
+// Detection types you will see here
+//   adminConfirmedServicePrincipalCompromised  Manual  - SOC asserted compromise
+//   leakedCredentials                          Auto    - Microsoft Threat Intelligence
+//   suspiciousSignIns                          Auto    - ML: unusual IP / impossible travel
+//   anomalousServicePrincipalActivity          Auto    - ML: deviation from baseline
+//   maliciousApplication                       Auto    - Threat intel app match
+//
+// Why it matters
+//   This is the exact signal the Conditional Access "service principal risk" condition
+//   evaluates. If a row appears here and the CA policy is enforced, that identity is
+//   already being denied tokens. Low is deliberately excluded to avoid false positives
+//   on minor behavioural noise.
+//
+// Triage
+//   1. Read RiskEventType first - it tells you whether a human or the ML engine decided.
+//   2. adminConfirmed* means someone already investigated. Find their ticket.
+//   3. Automatic detections need corroboration: check D1, D3, and D4 for the same AppId.
+// =====================================================================================
+
+let Lookback = 7d;
+AADServicePrincipalRiskEvents
+| where TimeGenerated > ago(Lookback)
+| where RiskLevel in ("high", "medium")
+| where RiskState !in ("remediated", "dismissed")
+| project
+    TimeGenerated,
+    ServicePrincipalDisplayName,
+    ServicePrincipalId,
+    AppId,
+    RiskEventType,
+    RiskLevel,
+    RiskState,
+    RiskDetail,
+    DetectionTimingType,
+    Activity,
+    IpAddress
+| order by TimeGenerated desc

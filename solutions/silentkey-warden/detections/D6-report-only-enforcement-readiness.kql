@@ -1,0 +1,47 @@
+// =====================================================================================
+// D6 - Report-only enforcement readiness (HUNTING QUERY - deliberately not an alert)
+// -------------------------------------------------------------------------------------
+// Maps to  : POC Step 8 - Verify the Conditional Access Decision
+// Table    : AADServicePrincipalSignInLogs  (diagnostic category: ServicePrincipalSignInLogs)
+// -------------------------------------------------------------------------------------
+// Why this is NOT deployed as an alert rule
+//   Report-only evaluations happen constantly and by design. Alerting on them would page
+//   the SOC for a policy that is doing exactly what it was configured to do. This is a
+//   decision-support query you run deliberately, before flipping a policy to enforced.
+//
+// What it answers
+//   "If I turn this policy on right now, what breaks?"
+//
+//   reportOnlyFailure      = WOULD HAVE BEEN BLOCKED. This is your blast radius.
+//   reportOnlySuccess      = would have been allowed
+//   reportOnlyInterrupted  = would have been challenged (not applicable to workload IDs)
+//   reportOnlyNotApplied   = policy conditions did not match
+//
+// How to use it
+//   1. Run it after the policy has been in report-only mode for at least 7 days.
+//   2. WouldHaveBlocked should be zero, or every identity in AffectedIdentities should
+//      be one you have already investigated and expect to block.
+//   3. A non-zero count against identities you do not recognise means STOP - investigate
+//      before enforcing, or you will take a production outage the moment you flip it.
+//   4. Once the list is clean or fully understood, switch Enable policy from
+//      Report-only to On.
+//
+// This is the single most useful query in the pack for getting a customer comfortable
+// moving from report-only to enforced.
+// =====================================================================================
+
+let Lookback = 7d;
+AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(Lookback)
+| mv-expand Policy = ConditionalAccessPolicies
+| extend PolicyName = tostring(Policy.displayName), PolicyResult = tostring(Policy.result)
+| where isnotempty(PolicyName)
+| summarize
+    Evaluations        = count(),
+    WouldHaveBlocked   = countif(PolicyResult == "reportOnlyFailure"),
+    ActuallyBlocked    = countif(PolicyResult == "failure"),
+    AffectedIdentities = dcount(ServicePrincipalId),
+    Identities         = make_set_if(ServicePrincipalName, PolicyResult == "reportOnlyFailure", 25)
+    by PolicyName
+| extend EnforcementSafe = iff(WouldHaveBlocked == 0, "Yes - no impact observed", "No - review Identities before enforcing")
+| order by WouldHaveBlocked desc

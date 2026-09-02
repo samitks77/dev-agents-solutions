@@ -1,0 +1,644 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "silentkey-warden - Workload Identity Protection detection layer. Deploys a Log Analytics workspace, an SOC action group, five scheduled query alert rules that turn the manual POC tests (A-E) into standing production detections, and an Azure Monitor workbook."
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "silentkey",
+      "minLength": 3,
+      "maxLength": 16,
+      "metadata": {
+        "description": "Short prefix applied to every resource name so the solution is identifiable in a shared subscription."
+      }
+    },
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "defaultValue": "law-silentkey-warden",
+      "metadata": {
+        "description": "Log Analytics workspace that receives Entra ID audit, service principal sign-in, and workload identity risk logs."
+      }
+    },
+    "retentionInDays": {
+      "type": "int",
+      "defaultValue": 90,
+      "minValue": 30,
+      "maxValue": 730,
+      "metadata": {
+        "description": "Workspace retention. 90 days is the recommended floor so the 14-day behavioural baseline used by the first-time-resource-access detection always has history behind it."
+      }
+    },
+    "dailyQuotaGb": {
+      "type": "int",
+      "defaultValue": -1,
+      "metadata": {
+        "description": "Daily ingestion cap in GB. -1 means uncapped. Set a value in shared or lab subscriptions to bound cost."
+      }
+    },
+    "socEmailAddress": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional SOC distribution address for alert notifications. Leave empty to deploy the action group with no receivers and wire notifications later."
+      }
+    },
+    "deployAlertRules": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy the five workload identity detections. Set false to deploy the workspace only."
+      }
+    },
+    "deployWorkbook": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy the Workload Identity Protection workbook."
+      }
+    },
+    "alertEvaluationFrequency": {
+      "type": "string",
+      "defaultValue": "PT15M",
+      "allowedValues": [
+        "PT5M",
+        "PT10M",
+        "PT15M",
+        "PT30M",
+        "PT1H"
+      ],
+      "metadata": {
+        "description": "How often each detection runs."
+      }
+    },
+    "alertWindowSize": {
+      "type": "string",
+      "defaultValue": "PT1H",
+      "allowedValues": [
+        "PT30M",
+        "PT1H",
+        "PT2H",
+        "PT6H"
+      ],
+      "metadata": {
+        "description": "Lookback window each detection evaluates. Must be greater than or equal to the evaluation frequency."
+      }
+    },
+    "burstResourceThreshold": {
+      "type": "int",
+      "defaultValue": 4,
+      "minValue": 2,
+      "maxValue": 20,
+      "metadata": {
+        "description": "Number of distinct resources a single workload identity must touch inside the burst window before the lateral movement detection fires."
+      }
+    },
+    "tagValues": {
+      "type": "object",
+      "defaultValue": {
+        "solution": "silentkey-warden",
+        "workload": "workload-identity-protection",
+        "managedBy": "dev-agents-solutions"
+      },
+      "metadata": {
+        "description": "Tags applied to every resource for cost attribution and inventory."
+      }
+    }
+  },
+  "variables": {
+    "actionGroupName": "[format('ag-{0}-soc', parameters('namePrefix'))]",
+    "actionGroupShortName": "[take(format('{0}soc', parameters('namePrefix')), 12)]",
+    "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+    "actionGroupResourceId": "[resourceId('Microsoft.Insights/actionGroups', variables('actionGroupName'))]",
+    "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'workload-identity-protection')]",
+    "emailReceivers": [
+      {
+        "name": "soc-primary",
+        "emailAddress": "[parameters('socEmailAddress')]",
+        "useCommonAlertSchema": true
+      }
+    ],
+    "alertActions": {
+      "actionGroups": [
+        "[variables('actionGroupResourceId')]"
+      ]
+    },
+    "queryCredentialAdded": "AuditLogs\n| where Category == \"ApplicationManagement\"\n| where OperationName has_all (\"Update application\", \"Certificates and secrets management\")\n| extend TargetApp = tostring(TargetResources[0].displayName)\n| extend TargetAppId = tostring(TargetResources[0].id)\n| extend Initiator = coalesce(tostring(InitiatedBy.user.userPrincipalName), tostring(InitiatedBy.app.displayName), \"unknown\")\n| extend InitiatorIp = tostring(InitiatedBy.user.ipAddress)\n| mv-expand ModifiedProperty = TargetResources[0].modifiedProperties\n| where tostring(ModifiedProperty.displayName) == \"KeyDescription\"\n| extend OldKeys = tostring(ModifiedProperty.oldValue), NewKeys = tostring(ModifiedProperty.newValue)\n| extend OldKeyCount = countof(OldKeys, \"KeyIdentifier\"), NewKeyCount = countof(NewKeys, \"KeyIdentifier\")\n| where NewKeyCount > OldKeyCount\n| project TimeGenerated, TargetApp, TargetAppId, Initiator, InitiatorIp, OldKeyCount, NewKeyCount, Result, CorrelationId\n| order by TimeGenerated desc",
+    "queryRiskyWorkloadIdentity": "AADServicePrincipalRiskEvents\n| where RiskLevel in (\"high\", \"medium\")\n| where RiskState !in (\"remediated\", \"dismissed\")\n| project TimeGenerated, ServicePrincipalDisplayName, ServicePrincipalId, AppId, RiskEventType, RiskLevel, RiskState, RiskDetail, DetectionTimingType, Activity, IpAddress\n| order by TimeGenerated desc",
+    "queryBurstSignIn": "[format('let BurstWindow = 10m;\nlet ResourceThreshold = {0};\nAADServicePrincipalSignInLogs\n| where ResultType == 0\n| summarize\n    DistinctResources = dcount(ResourceDisplayName),\n    Resources = make_set(ResourceDisplayName, 20),\n    SignIns = count(),\n    FirstSeen = min(TimeGenerated),\n    LastSeen = max(TimeGenerated),\n    SourceIPs = make_set(IPAddress, 10)\n    by ServicePrincipalName, ServicePrincipalId, AppId, BurstBin = bin(TimeGenerated, BurstWindow)\n| where DistinctResources >= ResourceThreshold\n| order by DistinctResources desc', parameters('burstResourceThreshold'))]",
+    "queryFirstTimeResource": "let BaselineWindow = 14d;\nlet DetectionWindow = 1h;\nlet KnownPairs = AADServicePrincipalSignInLogs\n    | where TimeGenerated between (ago(BaselineWindow) .. ago(DetectionWindow))\n    | where ResultType == 0\n    | distinct ServicePrincipalId, ResourceDisplayName;\nAADServicePrincipalSignInLogs\n| where ResultType == 0\n| join kind=leftanti KnownPairs on ServicePrincipalId, ResourceDisplayName\n| summarize\n    FirstAccess = min(TimeGenerated),\n    SignIns = count(),\n    SourceIPs = make_set(IPAddress, 10)\n    by ServicePrincipalName, ServicePrincipalId, AppId, ResourceDisplayName\n| order by FirstAccess desc",
+    "queryConditionalAccessBlock": "AADServicePrincipalSignInLogs\n| where ResultType == 53003\n| extend AppliedPolicies = tostring(ConditionalAccessPolicies)\n| project TimeGenerated, ServicePrincipalName, ServicePrincipalId, AppId, ResourceDisplayName, IPAddress, ResultType, ResultDescription, AppliedPolicies\n| order by TimeGenerated desc",
+    "workbookContent": {
+      "version": "Notebook/1.0",
+      "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
+      "fallbackResourceIds": [
+        "[variables('workspaceResourceId')]"
+      ],
+      "items": [
+        {
+          "type": 1,
+          "name": "title",
+          "content": {
+            "json": "# Workload Identity Protection\n\nRisk, credential change, and Conditional Access posture for **service principals and managed identities**.\n\nRequires Entra ID diagnostic settings streaming `AuditLogs`, `ServicePrincipalSignInLogs`, `RiskyServicePrincipals`, and `ServicePrincipalRiskEvents` to this workspace."
+          }
+        },
+        {
+          "type": 9,
+          "name": "parameters",
+          "content": {
+            "version": "KqlParameterItem/1.0",
+            "parameters": [
+              {
+                "id": "timerange",
+                "version": "KqlParameterItem/1.0",
+                "name": "TimeRange",
+                "label": "Time range",
+                "type": 4,
+                "isRequired": true,
+                "value": {
+                  "durationMs": 604800000
+                },
+                "typeSettings": {
+                  "selectableValues": [
+                    {
+                      "durationMs": 86400000
+                    },
+                    {
+                      "durationMs": 604800000
+                    },
+                    {
+                      "durationMs": 2592000000
+                    }
+                  ]
+                }
+              }
+            ],
+            "style": "pills",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces"
+          }
+        },
+        {
+          "type": 1,
+          "name": "posture-heading",
+          "content": {
+            "json": "## Posture at a glance"
+          }
+        },
+        {
+          "type": 3,
+          "name": "tiles-risk",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalRiskEvents\n| summarize Events = count() by RiskLevel\n| order by RiskLevel asc",
+            "size": 3,
+            "title": "Workload identity risk events by level",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "tiles",
+            "tileSettings": {
+              "titleContent": {
+                "columnMatch": "RiskLevel",
+                "formatter": 1
+              },
+              "leftContent": {
+                "columnMatch": "Events",
+                "formatter": 12,
+                "formatOptions": {
+                  "palette": "auto"
+                }
+              },
+              "showBorder": true
+            }
+          }
+        },
+        {
+          "type": 3,
+          "name": "risk-over-time",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalRiskEvents\n| summarize Events = count() by bin(TimeGenerated, 1h), RiskEventType\n| order by TimeGenerated asc",
+            "size": 0,
+            "title": "Risk detections over time by detection type",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "timechart"
+          }
+        },
+        {
+          "type": 3,
+          "name": "top-risky-sps",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalRiskEvents\n| summarize Detections = count(), LastSeen = max(TimeGenerated), Types = make_set(RiskEventType, 10), HighestRisk = max(RiskLevel) by ServicePrincipalDisplayName, ServicePrincipalId, AppId\n| order by Detections desc\n| take 25",
+            "size": 0,
+            "title": "Riskiest workload identities",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "table",
+            "gridSettings": {
+              "formatters": [
+                {
+                  "columnMatch": "Detections",
+                  "formatter": 8,
+                  "formatOptions": {
+                    "palette": "redBright"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": 1,
+          "name": "persistence-heading",
+          "content": {
+            "json": "## Credential persistence (MITRE T1098.001)\n\nA second client secret added to an app registration is a silent persistence technique. There is no alert on it by default."
+          }
+        },
+        {
+          "type": 3,
+          "name": "credential-changes",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AuditLogs\n| where Category == \"ApplicationManagement\"\n| where OperationName has_all (\"Update application\", \"Certificates and secrets management\")\n| extend TargetApp = tostring(TargetResources[0].displayName)\n| extend Initiator = coalesce(tostring(InitiatedBy.user.userPrincipalName), tostring(InitiatedBy.app.displayName), \"unknown\")\n| extend InitiatorIp = tostring(InitiatedBy.user.ipAddress)\n| project TimeGenerated, TargetApp, Initiator, InitiatorIp, Result, CorrelationId\n| order by TimeGenerated desc\n| take 50",
+            "size": 0,
+            "title": "Application credential changes",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "table"
+          }
+        },
+        {
+          "type": 1,
+          "name": "lateral-heading",
+          "content": {
+            "json": "## Resource reach and lateral movement\n\nA legitimate workload identity usually touches one or two resources. A burst across many is enumeration behaviour."
+          }
+        },
+        {
+          "type": 3,
+          "name": "resource-reach",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalSignInLogs\n| where ResultType == 0\n| summarize DistinctResources = dcount(ResourceDisplayName), SignIns = count(), Resources = make_set(ResourceDisplayName, 20) by ServicePrincipalName, ServicePrincipalId\n| order by DistinctResources desc\n| take 25",
+            "size": 0,
+            "title": "Resource reach per workload identity",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "table",
+            "gridSettings": {
+              "formatters": [
+                {
+                  "columnMatch": "DistinctResources",
+                  "formatter": 8,
+                  "formatOptions": {
+                    "palette": "orange"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": 1,
+          "name": "ca-heading",
+          "content": {
+            "json": "## Conditional Access outcomes\n\n`reportOnlyFailure` means the policy would have blocked the sign-in if it were enforced. That column is your enforcement readiness signal."
+          }
+        },
+        {
+          "type": 3,
+          "name": "ca-outcomes",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalSignInLogs\n| mv-expand Policy = ConditionalAccessPolicies\n| extend PolicyName = tostring(Policy.displayName), PolicyResult = tostring(Policy.result)\n| where isnotempty(PolicyName)\n| summarize Evaluations = count(), WouldHaveBlocked = countif(PolicyResult == \"reportOnlyFailure\"), Blocked = countif(PolicyResult == \"failure\"), AffectedIdentities = dcount(ServicePrincipalId) by PolicyName\n| order by WouldHaveBlocked desc",
+            "size": 0,
+            "title": "Conditional Access policy outcomes for workload identities",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "table"
+          }
+        },
+        {
+          "type": 3,
+          "name": "ca-blocks",
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "AADServicePrincipalSignInLogs\n| where ResultType == 53003\n| project TimeGenerated, ServicePrincipalName, AppId, ResourceDisplayName, IPAddress, ResultDescription\n| order by TimeGenerated desc\n| take 50",
+            "size": 0,
+            "title": "Enforced blocks (AADSTS53003)",
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "visualization": "table"
+          }
+        }
+      ]
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2022-10-01",
+      "name": "[parameters('logAnalyticsWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": "[parameters('retentionInDays')]",
+        "features": {
+          "searchVersion": 1,
+          "enableLogAccessUsingOnlyResourcePermissions": true
+        },
+        "workspaceCapping": {
+          "dailyQuotaGb": "[parameters('dailyQuotaGb')]"
+        },
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Insights/actionGroups",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('actionGroupName')]",
+      "location": "Global",
+      "tags": "[parameters('tagValues')]",
+      "properties": {
+        "groupShortName": "[variables('actionGroupShortName')]",
+        "enabled": true,
+        "emailReceivers": "[if(empty(parameters('socEmailAddress')), createArray(), variables('emailReceivers'))]"
+      }
+    },
+    {
+      "condition": "[parameters('deployAlertRules')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-03-15-preview",
+      "name": "[format('{0}-D1-workload-identity-credential-added', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "LogAlert",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]",
+        "[variables('actionGroupResourceId')]"
+      ],
+      "properties": {
+        "displayName": "D1 - Credential added to an application (T1098.001)",
+        "description": "A client secret or certificate was added to an app registration, increasing its credential count. This is the backdoor persistence technique demonstrated by POC Test B and is silent by default. Investigate the initiator and confirm the change was an approved rotation.",
+        "severity": 2,
+        "enabled": true,
+        "evaluationFrequency": "[parameters('alertEvaluationFrequency')]",
+        "windowSize": "[parameters('alertWindowSize')]",
+        "scopes": [
+          "[variables('workspaceResourceId')]"
+        ],
+        "criteria": {
+          "allOf": [
+            {
+              "query": "[variables('queryCredentialAdded')]",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 1,
+                "minFailingPeriodsToAlert": 1
+              }
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "skipQueryValidation": true,
+        "actions": "[variables('alertActions')]"
+      }
+    },
+    {
+      "condition": "[parameters('deployAlertRules')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-03-15-preview",
+      "name": "[format('{0}-D2-risky-workload-identity-detected', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "LogAlert",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]",
+        "[variables('actionGroupResourceId')]"
+      ],
+      "properties": {
+        "displayName": "D2 - Risky workload identity detected (High or Medium)",
+        "description": "Entra ID Protection raised a High or Medium risk detection against a service principal, either from ML-based behavioural analytics, threat intelligence, or an admin confirming compromise. This is the signal the Conditional Access policy acts on.",
+        "severity": 1,
+        "enabled": true,
+        "evaluationFrequency": "[parameters('alertEvaluationFrequency')]",
+        "windowSize": "[parameters('alertWindowSize')]",
+        "scopes": [
+          "[variables('workspaceResourceId')]"
+        ],
+        "criteria": {
+          "allOf": [
+            {
+              "query": "[variables('queryRiskyWorkloadIdentity')]",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 1,
+                "minFailingPeriodsToAlert": 1
+              }
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "skipQueryValidation": true,
+        "actions": "[variables('alertActions')]"
+      }
+    },
+    {
+      "condition": "[parameters('deployAlertRules')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-03-15-preview",
+      "name": "[format('{0}-D3-workload-identity-burst-signin', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "LogAlert",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]",
+        "[variables('actionGroupResourceId')]"
+      ],
+      "properties": {
+        "displayName": "D3 - Workload identity multi-resource burst sign-in (lateral movement)",
+        "description": "A single service principal authenticated to an unusually high number of distinct resources inside a short window. This mirrors an attacker enumerating what a compromised credential can reach (MITRE T1078 plus T1087) and is the pattern demonstrated by POC Test D.",
+        "severity": 2,
+        "enabled": true,
+        "evaluationFrequency": "[parameters('alertEvaluationFrequency')]",
+        "windowSize": "[parameters('alertWindowSize')]",
+        "scopes": [
+          "[variables('workspaceResourceId')]"
+        ],
+        "criteria": {
+          "allOf": [
+            {
+              "query": "[variables('queryBurstSignIn')]",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 1,
+                "minFailingPeriodsToAlert": 1
+              }
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "skipQueryValidation": true,
+        "actions": "[variables('alertActions')]"
+      }
+    },
+    {
+      "condition": "[parameters('deployAlertRules')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-03-15-preview",
+      "name": "[format('{0}-D4-workload-identity-first-time-resource', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "LogAlert",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]",
+        "[variables('actionGroupResourceId')]"
+      ],
+      "properties": {
+        "displayName": "D4 - Workload identity accessed a resource for the first time",
+        "description": "A service principal requested a token for a resource it has never touched in the previous 14 days. This is the anomalous resource pivot demonstrated by POC Test C, where an identity provisioned for SQL suddenly reaches for Fabric. Expect noise for the first two weeks while the baseline fills.",
+        "severity": 3,
+        "enabled": true,
+        "evaluationFrequency": "[parameters('alertEvaluationFrequency')]",
+        "windowSize": "[parameters('alertWindowSize')]",
+        "scopes": [
+          "[variables('workspaceResourceId')]"
+        ],
+        "criteria": {
+          "allOf": [
+            {
+              "query": "[variables('queryFirstTimeResource')]",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 1,
+                "minFailingPeriodsToAlert": 1
+              }
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "skipQueryValidation": true,
+        "actions": "[variables('alertActions')]"
+      }
+    },
+    {
+      "condition": "[parameters('deployAlertRules')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-03-15-preview",
+      "name": "[format('{0}-D5-workload-identity-blocked-by-ca', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "LogAlert",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]",
+        "[variables('actionGroupResourceId')]"
+      ],
+      "properties": {
+        "displayName": "D5 - Workload identity blocked by Conditional Access (AADSTS53003)",
+        "description": "Conditional Access denied token issuance to a service principal. Confirms containment is working, and flags the case where a legitimate identity was caught by the risk policy and needs investigation before the risk is dismissed.",
+        "severity": 2,
+        "enabled": true,
+        "evaluationFrequency": "[parameters('alertEvaluationFrequency')]",
+        "windowSize": "[parameters('alertWindowSize')]",
+        "scopes": [
+          "[variables('workspaceResourceId')]"
+        ],
+        "criteria": {
+          "allOf": [
+            {
+              "query": "[variables('queryConditionalAccessBlock')]",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 1,
+                "minFailingPeriodsToAlert": 1
+              }
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "skipQueryValidation": true,
+        "actions": "[variables('alertActions')]"
+      }
+    },
+    {
+      "condition": "[parameters('deployWorkbook')]",
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2022-04-01",
+      "name": "[variables('workbookName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tagValues')]",
+      "kind": "shared",
+      "dependsOn": [
+        "[variables('workspaceResourceId')]"
+      ],
+      "properties": {
+        "displayName": "Workload Identity Protection - silentkey-warden",
+        "category": "workbook",
+        "version": "1.0",
+        "sourceId": "[variables('workspaceResourceId')]",
+        "serializedData": "[string(variables('workbookContent'))]"
+      }
+    }
+  ],
+  "outputs": {
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "value": "[parameters('logAnalyticsWorkspaceName')]"
+    },
+    "logAnalyticsWorkspaceResourceId": {
+      "type": "string",
+      "value": "[variables('workspaceResourceId')]"
+    },
+    "logAnalyticsCustomerId": {
+      "type": "string",
+      "value": "[reference(variables('workspaceResourceId'), '2022-10-01').customerId]"
+    },
+    "actionGroupResourceId": {
+      "type": "string",
+      "value": "[variables('actionGroupResourceId')]"
+    },
+    "alertRulesDeployed": {
+      "type": "int",
+      "value": "[if(parameters('deployAlertRules'), 5, 0)]"
+    },
+    "workbookResourceId": {
+      "type": "string",
+      "value": "[if(parameters('deployWorkbook'), resourceId('Microsoft.Insights/workbooks', variables('workbookName')), '')]"
+    },
+    "nextStepConfigureEntraDiagnostics": {
+      "type": "string",
+      "value": "[format('Stream Entra ID logs into this workspace, otherwise every detection stays silent. Run: ./scripts/configure-entra-diagnostics.ps1 -WorkspaceResourceId {0}', variables('workspaceResourceId'))]"
+    }
+  }
+}

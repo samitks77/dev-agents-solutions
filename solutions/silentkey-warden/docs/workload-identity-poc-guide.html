@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workload Identity Protection — POC Step-by-Step Guide</title>
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    document.documentElement.setAttribute("data-theme", param || "dark");
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #0f6e5c;
+  --cp-accent-hover: #0b5346;
+  --cp-accent-soft: rgba(15, 110, 92, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(15, 110, 92, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #4fd8bd;
+  --cp-accent-hover: #3fc7ac;
+  --cp-accent-soft: rgba(79, 216, 189, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(79, 216, 189, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+code, .mono { font-family: Consolas, "Courier New", Courier, monospace; }
+
+code {
+  background: var(--cp-surface-soft); border: 1px solid var(--cp-border);
+  border-radius: 5px; padding: 1px 6px; font-size: 0.85em; color: var(--cp-accent);
+}
+
+.layout { display: flex; max-width: 1400px; margin: 0 auto; gap: 28px; padding: 0 24px; }
+
+nav {
+  position: sticky; top: 0; align-self: flex-start;
+  height: 100vh; overflow-y: auto;
+  width: 250px; flex-shrink: 0;
+  padding: 28px 0 40px;
+}
+nav .navtitle {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--cp-text-soft); margin: 0 0 12px 12px; font-weight: 700;
+}
+nav .navtitle.mt { margin-top: 16px; }
+nav a {
+  display: block; padding: 7px 12px; margin-bottom: 2px;
+  color: var(--cp-text-muted); text-decoration: none;
+  border-radius: 0.625rem; font-size: 0.86rem;
+  border-left: 2px solid transparent;
+}
+nav a:hover { background: var(--cp-accent-soft); color: var(--cp-accent); }
+nav a.active { background: var(--cp-accent-soft); color: var(--cp-accent); border-left-color: var(--cp-accent); font-weight: 600; }
+
+main { flex: 1; min-width: 0; padding: 28px 0 120px; }
+
+header.hero {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  padding: 32px 34px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+}
+header.hero h1 { margin: 0 0 6px; font-size: 2.1rem; letter-spacing: -0.02em; }
+header.hero .sub { color: var(--cp-text-muted); font-size: 1.02rem; margin-bottom: 18px; }
+.metarow { display: flex; flex-wrap: wrap; gap: 10px; }
+.chip {
+  background: var(--cp-surface-soft); border: 1px solid var(--cp-border);
+  border-radius: 999px; padding: 5px 13px; font-size: 0.79rem; color: var(--cp-text-muted);
+}
+.chip strong { color: var(--cp-text); }
+
+.classbanner {
+  background: var(--cp-accent-soft);
+  border: 1px solid var(--cp-accent);
+  border-radius: 0.625rem;
+  padding: 12px 16px; margin-bottom: 20px;
+  font-size: 0.87rem; color: var(--cp-text);
+}
+.classbanner strong { color: var(--cp-accent); }
+
+section { margin-bottom: 34px; scroll-margin-top: 20px; }
+section > h2 {
+  font-size: 1.32rem; margin: 0 0 4px;
+  display: flex; align-items: center; gap: 10px;
+}
+section > .lede { color: var(--cp-text-muted); margin: 0 0 16px; font-size: 0.94rem; }
+
+.card {
+  background: var(--cp-surface); border: 1px solid var(--cp-border);
+  border-radius: 16px; padding: 22px 24px; margin-bottom: 14px;
+  box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+}
+.card h3 { margin: 0 0 10px; font-size: 1.02rem; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card h3.first { margin-top: 0; }
+.card h4 { margin: 18px 0 8px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cp-text-soft); }
+.card h4.first { margin-top: 0; }
+
+.stepnum {
+  background: var(--cp-accent); color: var(--cp-accent-fg);
+  border-radius: 8px; padding: 2px 10px; font-size: 0.78rem;
+  font-weight: 800; letter-spacing: 0.04em; flex-shrink: 0;
+}
+.stepnum.sub { background: var(--cp-surface-soft); color: var(--cp-accent); border: 1px solid var(--cp-accent); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px,1fr)); gap: 14px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px,1fr)); gap: 14px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.87rem; margin: 6px 0; }
+th {
+  text-align: left; padding: 9px 11px;
+  border-bottom: 2px solid var(--cp-border-strong);
+  font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--cp-text-soft); white-space: nowrap;
+}
+td { padding: 9px 11px; border-bottom: 1px solid var(--cp-border); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--cp-surface-soft); }
+.tblwrap { overflow-x: auto; }
+
+.badge {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+}
+.b-red   { background: var(--cp-danger);  color: var(--cp-surface); }
+.b-blue  { background: var(--cp-link);    color: var(--cp-surface); }
+.b-green { background: var(--cp-success); color: var(--cp-surface); }
+.b-warn  { background: var(--cp-surface); color: var(--cp-warning); border: 1px solid var(--cp-warning); }
+.b-soft  { background: var(--cp-surface-soft); color: var(--cp-text-muted); border: 1px solid var(--cp-border); }
+
+.callout { border-left: 3px solid var(--cp-accent); background: var(--cp-accent-soft);
+  padding: 13px 17px; border-radius: 0 0.625rem 0.625rem 0; margin: 12px 0; font-size: 0.9rem; }
+.callout.warn { border-left-color: var(--cp-warning); background: var(--cp-surface-soft); }
+.callout.good { border-left-color: var(--cp-success); background: var(--cp-surface-soft); }
+.callout.stop { border-left-color: var(--cp-danger); background: var(--cp-surface-soft); }
+.callout .lbl { font-weight: 700; display: block; margin-bottom: 3px; font-size: 0.82rem; }
+
+blockquote {
+  margin: 14px 0; padding: 16px 20px;
+  background: var(--cp-surface-soft); border-radius: 0.625rem;
+  border-left: 3px solid var(--cp-border-strong);
+  font-size: 0.95rem; font-style: italic; color: var(--cp-text);
+}
+blockquote .attrib { display: block; margin-top: 9px; font-style: normal; font-size: 0.82rem; color: var(--cp-text-soft); }
+blockquote.scenario { border-left-color: var(--cp-danger); font-style: normal; }
+blockquote.scenario .lbl { font-weight: 700; color: var(--cp-danger); display: block; margin-bottom: 4px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.codeblock { position: relative; margin: 10px 0; }
+.codeblock pre {
+  background: var(--cp-bg-elevated); border: 1px solid var(--cp-border);
+  border-left: 3px solid var(--cp-accent);
+  border-radius: 0 0.625rem 0.625rem 0;
+  padding: 15px 17px; margin: 0; overflow-x: auto;
+  font-family: Consolas, "Courier New", Courier, monospace;
+  font-size: 0.82rem; line-height: 1.6; color: var(--cp-text);
+}
+.codeblock .lang {
+  position: absolute; top: 0; left: 17px; transform: translateY(-50%);
+  background: var(--cp-surface); border: 1px solid var(--cp-border);
+  border-radius: 999px; padding: 1px 10px;
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--cp-text-soft); font-weight: 700;
+}
+.copybtn {
+  position: absolute; top: 9px; right: 9px;
+  background: var(--cp-surface); border: 1px solid var(--cp-border);
+  color: var(--cp-text-muted); border-radius: 7px;
+  font-size: 0.72rem; padding: 3px 10px; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s ease; font-family: inherit;
+}
+.codeblock:hover .copybtn { opacity: 1; }
+.copybtn:hover { border-color: var(--cp-accent); color: var(--cp-accent); }
+.copybtn.done { color: var(--cp-success); border-color: var(--cp-success); }
+pre .c { color: var(--cp-text-soft); font-style: italic; }
+pre .s { color: var(--cp-success); }
+pre .k { color: var(--cp-link); }
+pre .v { color: var(--cp-warning); }
+pre .p { color: var(--cp-danger); }
+
+.path {
+  display: inline-block; background: var(--cp-surface-soft);
+  border: 1px solid var(--cp-border); border-radius: 6px;
+  padding: 1px 8px; font-size: 0.82rem; color: var(--cp-text);
+}
+.path b { color: var(--cp-accent); font-weight: 600; }
+
+.stack { display: flex; flex-direction: column-reverse; gap: 6px; }
+.layer {
+  display: flex; align-items: center; gap: 14px;
+  padding: 13px 18px; border-radius: 0.625rem;
+  background: var(--cp-surface-soft); border: 1px solid var(--cp-border);
+}
+.layer .ico { font-size: 1.3rem; width: 30px; text-align: center; flex-shrink: 0; }
+.layer .nm { font-weight: 700; width: 200px; flex-shrink: 0; font-size: 0.92rem; }
+.layer .ds { font-size: 0.84rem; color: var(--cp-text-muted); }
+.layer.hl { background: var(--cp-accent-soft); border-color: var(--cp-accent); }
+
+.loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px,1fr)); gap: 14px; }
+.loopcard { border-radius: 16px; padding: 18px; border: 2px solid; background: var(--cp-surface); }
+.loopcard.discover { border-color: var(--cp-link); }
+.loopcard.resolve { border-color: var(--cp-warning); }
+.loopcard.govern { border-color: var(--cp-success); }
+.loopcard.block { border-color: var(--cp-danger); }
+.loopcard .lc-h { display: flex; align-items: center; gap: 8px; font-weight: 800; margin-bottom: 4px; font-size: 1rem; }
+.loopcard .lc-do { font-size: 0.8rem; color: var(--cp-text-soft); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 9px; font-weight: 600;}
+.loopcard .lc-q { font-size: 0.89rem; margin-bottom: 11px; }
+.loopcard ul { margin: 0; padding-left: 17px; font-size: 0.83rem; color: var(--cp-text-muted); }
+.loopcard li { margin-bottom: 3px; }
+
+.pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; }
+.pipe-step { flex: 1; min-width: 165px; background: var(--cp-surface-soft);
+  border: 1px solid var(--cp-border); padding: 15px 14px; position: relative; }
+.pipe-step:first-child { border-radius: 0.625rem 0 0 0.625rem; }
+.pipe-step:last-child { border-radius: 0 0.625rem 0.625rem 0; }
+.pipe-step .pn { font-size: 0.7rem; font-weight: 800; color: var(--cp-accent); letter-spacing: 0.08em; }
+.pipe-step .pt { font-weight: 700; font-size: 0.89rem; margin: 4px 0 5px; }
+.pipe-step .pd { font-size: 0.79rem; color: var(--cp-text-muted); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px,1fr)); gap: 14px; }
+.stat { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 16px; padding: 18px; text-align: center; }
+.stat .big { font-size: 1.85rem; font-weight: 800; color: var(--cp-accent); line-height: 1.15; }
+.stat .cap { font-size: 0.79rem; color: var(--cp-text-muted); margin-top: 5px; }
+
+ul.tight { margin: 8px 0; padding-left: 19px; }
+ul.tight li { margin-bottom: 5px; font-size: 0.9rem; }
+ol.tight { margin: 8px 0; padding-left: 21px; }
+ol.tight li { margin-bottom: 6px; font-size: 0.9rem; }
+ol.tight ul, ol.tight ol { margin: 6px 0; }
+
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px,1fr)); gap: 10px; }
+.kv .kvi { background: var(--cp-surface-soft); border: 1px solid var(--cp-border);
+  border-radius: 0.625rem; padding: 11px 14px; font-size: 0.85rem; }
+.kv .kvi .kk { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--cp-text-soft); font-weight: 700; margin-bottom: 3px; }
+
+.qa { border-bottom: 1px solid var(--cp-border); padding: 13px 0; }
+.qa:last-child { border-bottom: none; }
+.qa .q { font-weight: 700; margin-bottom: 5px; font-size: 0.93rem; }
+.qa .q::before { content: "Q "; color: var(--cp-accent); font-weight: 800; }
+.qa .a { font-size: 0.89rem; color: var(--cp-text-muted); }
+.qa .a::before { content: "A "; color: var(--cp-success); font-weight: 800; }
+
+footer { color: var(--cp-text-soft); font-size: 0.8rem; text-align: center;
+  padding: 26px 0 10px; border-top: 1px solid var(--cp-border); margin-top: 32px; }
+
+a.ref { color: var(--cp-link); text-decoration: none; }
+a.ref:hover { text-decoration: underline; }
+
+@media (max-width: 900px) {
+  nav { display: none; }
+  .layout { padding: 0 16px; }
+  .layer .nm { width: auto; }
+}
+@media print {
+  :root, html[data-theme="dark"] {
+    color-scheme: light;
+    --cp-bg: #ffffff; --cp-bg-elevated: #ffffff; --cp-surface: #ffffff;
+    --cp-surface-soft: #f5f5f5; --cp-border: #dedede; --cp-border-strong: #919191;
+    --cp-text: #242424; --cp-text-muted: #5c5c5c; --cp-text-soft: #6f6f6f;
+    --cp-accent: #0f6e5c; --cp-accent-soft: rgba(15,110,92,0.08);
+    --cp-success: #16a34a; --cp-danger: #dc2626; --cp-warning: #b7791f; --cp-link: #0078d4;
+  }
+  nav { display: none; }
+  body { background: var(--cp-bg); font-size: 10.5pt; }
+  .card, header.hero { box-shadow: none; break-inside: avoid; }
+  section { break-inside: avoid-page; }
+  .layout { padding: 0; }
+  .copybtn { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <p class="navtitle">Core POC</p>
+  <a href="#overview">🎯 Overview</a>
+  <a href="#variables">🔑 Variables reference</a>
+  <a href="#prereqs">✅ Prerequisites</a>
+  <a href="#setup">🏗️ Steps 1–4 · Build the SP</a>
+  <a href="#protect">🛡️ Steps 5–9 · Protect &amp; prove</a>
+  <p class="navtitle mt">Theory</p>
+  <a href="#risklevels">📊 Understanding risk levels</a>
+  <a href="#whyconfirm">🤔 Why confirmCompromised</a>
+  <p class="navtitle mt">Simulation tests</p>
+  <a href="#testsetup">🧪 Test SP setup (A–D)</a>
+  <a href="#testa">🚨 Test A · Admin confirm</a>
+  <a href="#testb">🔑 Test B · Backdoor cred</a>
+  <a href="#testc">📊 Test C · Fabric access</a>
+  <a href="#testd">💥 Test D · Burst sign-in</a>
+  <a href="#teste">🛑 Test E · CA enforcement</a>
+  <p class="navtitle mt">Wrap-up</p>
+  <a href="#results">📋 Test results summary</a>
+  <a href="#cleanup">🧹 Cleanup</a>
+  <a href="#summary">✅ Requirements coverage</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>🛡️ Workload Identity Protection — POC</h1>
+  <div class="sub">Step-by-step guide for demonstrating Microsoft Entra Workload Identity Protection end-to-end, using the Azure portal and Graph Explorer.</div>
+  <div class="metarow">
+    <span class="chip">🏛️ Surfaces <strong>Entra portal · Graph Explorer</strong></span>
+    <span class="chip">🧪 Test identities <strong>5 service principals</strong></span>
+    <span class="chip">🔐 Default mode <strong>Report-only</strong></span>
+    <span class="chip">🚫 Production impact <strong>None</strong></span>
+  </div>
+</header>
+
+<div class="classbanner">
+  🔒 <strong>Handle the values in this POC like credentials.</strong> The client secrets, tenant ID, and service principal object IDs collected while following this guide must not be shared externally or pasted into tickets, chats, or shared documents. Use short-lived secrets (7 days), keep the Conditional Access policy in <em>report-only</em> until you deliberately demo the block, and run the <a class="ref" href="#cleanup">Cleanup</a> section when you're done.
+</div>
+
+<!-- ============ OVERVIEW ============ -->
+<section id="overview">
+  <h2>🎯 Overview — what this POC proves</h2>
+  <p class="lede">Four outcomes, demonstrated end-to-end without touching production.</p>
+
+  <div class="loop">
+    <div class="loopcard discover">
+      <div class="lc-h">1️⃣ Risky identity</div>
+      <div class="lc-do">Identity Protection</div>
+      <div class="lc-q">A service principal flagged as a <strong>Risky Workload Identity</strong>.</div>
+    </div>
+    <div class="loopcard resolve">
+      <div class="lc-h">2️⃣ Risk signal</div>
+      <div class="lc-do">Detection</div>
+      <div class="lc-q">A <strong>risk signal</strong> generated by abnormal or compromised behavior.</div>
+    </div>
+    <div class="loopcard govern">
+      <div class="lc-h">3️⃣ CA decision</div>
+      <div class="lc-do">Conditional Access</div>
+      <div class="lc-q">A <strong>Conditional Access decision</strong> — report-only, then block.</div>
+    </div>
+    <div class="loopcard block">
+      <div class="lc-h">4️⃣ Zero blast radius</div>
+      <div class="lc-do">Safety</div>
+      <div class="lc-q">All of the above <strong>without touching production</strong>.</div>
+    </div>
+  </div>
+
+  <div class="stats" style="margin-top:14px">
+    <div class="stat"><div class="big">9</div><div class="cap">Core POC steps</div></div>
+    <div class="stat"><div class="big">5</div><div class="cap">Test service principals</div></div>
+    <div class="stat"><div class="big">5</div><div class="cap">Simulation scenarios (A–E)</div></div>
+    <div class="stat"><div class="big">7d</div><div class="cap">Recommended secret lifetime</div></div>
+    <div class="stat"><div class="big">53003</div><div class="cap">AADSTS block error code</div></div>
+  </div>
+</section>
+
+<!-- ============ VARIABLES ============ -->
+<section id="variables">
+  <h2>🔑 Variables reference</h2>
+  <p class="lede">Collect these before starting — they're referenced throughout the guide as placeholders.</p>
+
+  <div class="card">
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Placeholder</th><th>Where to find it</th><th>Example format</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">&lt;Your Tenant ID&gt;</span></td>
+            <td><span class="path">Entra admin center → <b>Overview</b> → Tenant ID</span></td>
+            <td><span class="mono" style="color:var(--cp-text-muted)">xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</span></td>
+          </tr>
+          <tr>
+            <td><span class="mono">&lt;Application (client) ID from Step 1&gt;</span></td>
+            <td>Created in <strong>Step 1</strong> — App registration → Overview</td>
+            <td><span class="mono" style="color:var(--cp-text-muted)">xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</span></td>
+          </tr>
+          <tr>
+            <td><span class="mono">&lt;Secret Value from Step 2&gt;</span></td>
+            <td>Created in <strong>Step 2</strong> — copy immediately when generated</td>
+            <td><span class="mono" style="color:var(--cp-text-muted)">abc1D~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span></td>
+          </tr>
+          <tr>
+            <td><span class="mono">&lt;Service Principal Object ID from Step 3&gt;</span></td>
+            <td>Found in <strong>Step 3</strong> — Enterprise application → Overview → Object ID</td>
+            <td><span class="mono" style="color:var(--cp-text-muted)">xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout stop" style="margin-bottom:0">
+      <span class="lbl">🚨 Important</span>
+      Do not share these values externally. <strong>The client secret in particular should be treated as a password.</strong>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PREREQS ============ -->
+<section id="prereqs">
+  <h2>✅ Prerequisites</h2>
+  <p class="lede">Confirm all three before you start — the license is the one that most often blocks a POC.</p>
+
+  <div class="card">
+    <div class="stack">
+      <div class="layer"><div class="ico">🧰</div><div class="nm">Tooling</div><div class="ds">Azure portal / Entra admin center · Microsoft Graph Explorer · PowerShell (or any REST client such as Postman)</div></div>
+      <div class="layer"><div class="ico">👤</div><div class="nm">Directory role</div><div class="ds"><strong>Global Administrator</strong> or <strong>Security Administrator</strong></div></div>
+      <div class="layer hl"><div class="ico">📜</div><div class="nm">License</div><div class="ds"><strong>Microsoft Entra Workload Identities Premium</strong> — a standalone SKU, <em>not</em> included in Entra ID P2</div></div>
+    </div>
+    <div class="callout warn" style="margin-bottom:0">
+      <span class="lbl">🔎 Verify the license first</span>
+      <span class="path">Entra admin center → <b>Billing</b> → <b>Licenses</b> → <b>All products</b></span> → look for <code>Workload Identities Premium</code>. Without it, the Risky workload identities blade and the workload-identity Conditional Access conditions are unavailable.
+    </div>
+  </div>
+</section>
+
+<!-- ============ SETUP STEPS 1-4 ============ -->
+<section id="setup">
+  <h2>🏗️ Steps 1–4 — Build the test service principal</h2>
+  <p class="lede">Create an isolated app registration, give it a short-lived secret, and confirm it can authenticate. Nothing here touches an existing workload.</p>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 1</span> Create a test app registration</h3>
+    <ol class="tight">
+      <li>Go to the <strong>Microsoft Entra admin center</strong></li>
+      <li>Navigate to <span class="path"><b>Identity</b> → Applications → App registrations</span></li>
+      <li>Click <strong>+ New registration</strong></li>
+      <li>Enter:
+        <ul class="tight">
+          <li><strong>Name</strong>: <code>POC-RiskyWorkloadIdentity</code></li>
+          <li><strong>Supported account types</strong>: Accounts in this organizational directory only</li>
+        </ul>
+      </li>
+      <li>Click <strong>Register</strong></li>
+      <li>On the Overview page, copy the <strong>Application (client) ID</strong> — you'll need it later</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 2</span> Create a client secret</h3>
+    <ol class="tight">
+      <li>In the app registration you just created, go to <strong>Certificates &amp; secrets</strong></li>
+      <li>Click <strong>+ New client secret</strong></li>
+      <li>Enter:
+        <ul class="tight">
+          <li><strong>Description</strong>: <code>POC-Secret</code></li>
+          <li><strong>Expires</strong>: <strong>7 days</strong> (or a custom short duration for safety)</li>
+        </ul>
+      </li>
+      <li>Click <strong>Add</strong></li>
+      <li><strong>Immediately copy the secret Value</strong> — it won't be shown again</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 3</span> Note the service principal object ID</h3>
+    <ol class="tight">
+      <li>Go to <span class="path"><b>Identity</b> → Applications → Enterprise applications</span></li>
+      <li>Search for <code>POC-RiskyWorkloadIdentity</code></li>
+      <li>Click it and copy the <strong>Object ID</strong> from the Overview page</li>
+    </ol>
+    <div class="callout warn" style="margin-bottom:0">
+      <span class="lbl">⚠️ Don't confuse the two object IDs</span>
+      This is the <strong>Service Principal ID</strong> — it is <em>different</em> from the App Registration Object ID. Identity Protection APIs expect the service principal object ID; using the wrong one silently fails to flag anything.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 4</span> Test that the service principal can authenticate</h3>
+    <ol class="tight">
+      <li>Open <strong>PowerShell</strong> (or any REST client like Postman)</li>
+      <li>Run:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$body</span> = @{
+    grant_type    = <span class="s">"client_credentials"</span>
+    client_id     = <span class="s">"&lt;Application (client) ID from Step 1&gt;"</span>
+    client_secret = <span class="s">"&lt;Secret Value from Step 2&gt;"</span>
+    scope         = <span class="s">"https://graph.microsoft.com/.default"</span>
+}
+<span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/&lt;Your Tenant ID&gt;/oauth2/v2.0/token"</span> `
+    -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span></pre>
+    </div>
+    <div class="callout good" style="margin-bottom:0">
+      <span class="lbl">✅ Expected result</span>
+      A response containing <code>token_type: Bearer</code> and <code>expires_in: 3599</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============ PROTECT STEPS 5-9 ============ -->
+<section id="protect">
+  <h2>🛡️ Steps 5–9 — Protect, simulate, and prove</h2>
+  <p class="lede">Create the Conditional Access policy in report-only mode, generate a risk signal, then verify both the detection and the CA decision.</p>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 5</span> Create a Conditional Access policy for risky workload identities</h3>
+    <ol class="tight">
+      <li>Go to <span class="path">Entra admin center → <b>Protection</b> → Conditional Access → Policies</span></li>
+      <li>Click <strong>+ New policy</strong></li>
+      <li>Configure:
+        <ul class="tight">
+          <li><strong>Name</strong>: <code>POC - Block Risky Workload Identities</code></li>
+          <li><strong>What does this policy apply to?</strong>: select <strong>Workload identities</strong></li>
+          <li><strong>Include</strong>: <strong>Select service principals</strong> → search for and select all POC SPs (<code>POC-RiskyWorkloadIdentity</code>, <code>POC-Test-A-AdminConfirm</code>, <code>POC-Test-B-BackdoorCred</code>, <code>POC-Test-C-FabricAccess</code>, <code>POC-Test-D-BurstSignIn</code>)</li>
+          <li><strong>Target resources → Cloud apps</strong>: All cloud apps</li>
+          <li><strong>Conditions → Service principal risk</strong>: set to <strong>Yes (Configure)</strong> → check <strong>High</strong> and <strong>Medium</strong></li>
+          <li><strong>Grant</strong>: select <strong>Block access</strong></li>
+          <li><strong>Enable policy</strong>: set to <strong>Report-only</strong></li>
+        </ul>
+      </li>
+      <li>Click <strong>Create</strong></li>
+    </ol>
+    <div class="callout" style="margin-bottom:0">
+      <span class="lbl">🧪 Why report-only first</span>
+      Report-only mode logs the Conditional Access decision <em>without</em> actually blocking the sign-in. This is safe for initial testing — you get the full evaluation trail with none of the risk.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 6</span> Simulate a risk signal (mark SP as compromised)</h3>
+    <ol class="tight">
+      <li>Go to <strong>Microsoft Graph Explorer</strong></li>
+      <li>Sign in with your admin account</li>
+      <li>Set the method to <strong>POST</strong></li>
+      <li>Enter the URL:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">Endpoint</span>
+<pre><span class="p">POST</span> <span class="s">https://graph.microsoft.com/v1.0/identityProtection/riskyServicePrincipals/confirmCompromised</span></pre>
+    </div>
+    <ol class="tight" start="5">
+      <li>Go to the <strong>Request body</strong> tab and enter:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">JSON</span>
+<pre>{
+  <span class="k">"servicePrincipalIds"</span>: [<span class="s">"&lt;Service Principal Object ID from Step 3&gt;"</span>]
+}</pre>
+    </div>
+    <ol class="tight" start="6">
+      <li>Click <strong>Run query</strong></li>
+      <li>You should get a <strong>204 No Content</strong> response — this means success</li>
+    </ol>
+    <div class="callout warn" style="margin-bottom:0">
+      <span class="lbl">🔐 Permissions</span>
+      You may need to consent to <code>IdentityRiskyServicePrincipal.ReadWrite.All</code> in Graph Explorer. Click <strong>Modify permissions</strong> at the top if prompted.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 7</span> Verify the risk signal</h3>
+    <ol class="tight">
+      <li>Go to <span class="path">Entra admin center → <b>Protection</b> → Identity Protection → Risky workload identities</span></li>
+      <li>You should see <code>POC-RiskyWorkloadIdentity</code> listed with:</li>
+    </ol>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Risk state</div>Confirmed compromised</div>
+      <div class="kvi"><div class="kk">Risk level</div><span class="badge b-red">High</span></div>
+      <div class="kvi"><div class="kk">Risk detail</div>Admin confirmed service principal compromised</div>
+    </div>
+    <h4>Risk detections tab</h4>
+    <p style="font-size:0.9rem;margin-top:0">Click into the service principal to open the <strong>Risk detections</strong> tab, which shows:</p>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Detection type</div><span class="mono">Admin confirmed service principal compromised</span></div>
+      <div class="kvi"><div class="kk">Attack type(s)</div>Access using a valid account (Detected Offline)</div>
+      <div class="kvi"><div class="kk">MITRE technique</div><span class="badge b-warn">T1078</span> Valid Accounts</div>
+      <div class="kvi"><div class="kk">Source</div>Identity Protection</div>
+      <div class="kvi"><div class="kk">Activity</div>Service Principal</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 8</span> Verify the Conditional Access decision</h3>
+    <ol class="tight">
+      <li>Re-run the authentication test from <strong>Step 4</strong> (sign in as the SP again)</li>
+      <li>Since the policy is in <strong>report-only</strong> mode, the sign-in will <strong>succeed</strong> — but the CA decision is logged</li>
+      <li>Check the result:
+        <ul class="tight">
+          <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Monitoring → Sign-in logs</span></li>
+          <li>Switch to the <strong>Service principal sign-ins</strong> tab</li>
+          <li>Find the recent sign-in for <code>POC-RiskyWorkloadIdentity</code> and click into it</li>
+          <li>Open the <strong>Conditional Access</strong> tab</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Policy</div><span class="mono">POC - Block Risky Workload Identities</span></div>
+      <div class="kvi"><div class="kk">Result</div><span class="mono">Report-only: Not applied</span> — would have blocked if enforced</div>
+    </div>
+    <div class="callout warn" style="margin-bottom:0">
+      <span class="lbl">⏱️ Be patient</span>
+      Sign-in logs can take <strong>15–30 minutes</strong> to appear in the portal. Don't declare the demo broken before that window elapses.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum">Step 9</span> <span class="badge b-soft">Optional</span> Switch to enforce mode to show the actual block</h3>
+    <ol class="tight">
+      <li>Go to <span class="path"><b>Conditional Access</b> → Policies</span> → open <code>POC - Block Risky Workload Identities</code></li>
+      <li>Change <strong>Enable policy</strong> from <strong>Report-only</strong> to <strong>On</strong></li>
+      <li>Click <strong>Save</strong></li>
+      <li>Re-run the authentication test from <strong>Step 4</strong></li>
+      <li>This time the sign-in will <strong>fail</strong>:</li>
+    </ol>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Error code</div><span class="mono" style="color:var(--cp-danger)">AADSTS53003</span></div>
+      <div class="kvi"><div class="kk">Message</div>Access has been blocked by Conditional Access policies</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RISK LEVELS ============ -->
+<section id="risklevels">
+  <h2>📊 Understanding risk levels</h2>
+  <p class="lede">What actually drives High, Medium, and Low — and which of those you can realistically produce in a lab.</p>
+
+  <div class="card">
+    <h4 class="first">What drives each risk level?</h4>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Risk level</th><th>Trigger</th><th>Detection type</th><th>How it's generated</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="badge b-red">High</span></td>
+            <td>Admin manually confirms compromise via the <code>confirmCompromised</code> API</td>
+            <td><span class="mono">adminConfirmedServicePrincipalCompromised</span></td>
+            <td><strong>Manual</strong> — admin action via Graph API or portal</td>
+          </tr>
+          <tr>
+            <td><span class="badge b-red">High</span></td>
+            <td>Credentials found leaked (public GitHub repo, paste site, dark web)</td>
+            <td><span class="mono">leakedCredentials</span></td>
+            <td><strong>Automatic</strong> — Microsoft Threat Intelligence</td>
+          </tr>
+          <tr>
+            <td><span class="badge b-warn">Medium</span></td>
+            <td>Anomalous sign-in pattern — unusual IP, geography, or token properties</td>
+            <td><span class="mono">suspiciousSignIns</span></td>
+            <td><strong>Automatic</strong> — Entra ML-based detection</td>
+          </tr>
+          <tr>
+            <td><span class="badge b-warn">Medium</span></td>
+            <td>Service principal activity deviates significantly from its baseline</td>
+            <td><span class="mono">anomalousServicePrincipalActivity</span></td>
+            <td><strong>Automatic</strong> — Entra behavioral analytics</td>
+          </tr>
+          <tr>
+            <td><span class="badge b-warn">Medium</span></td>
+            <td>Sign-in from an IP associated with known malicious activity</td>
+            <td><span class="mono">maliciousApplication</span></td>
+            <td><strong>Automatic</strong> — Microsoft Threat Intelligence</td>
+          </tr>
+          <tr>
+            <td><span class="badge b-soft">Low</span></td>
+            <td>Minor behavioral anomalies not yet meeting the medium confidence threshold</td>
+            <td><span class="mono">anomalousServicePrincipalActivity</span> (low confidence)</td>
+            <td><strong>Automatic</strong> — Entra ML-based detection</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" style="margin:0">
+      <h3 class="first">🧭 What this means for the POC</h3>
+      <ul class="tight">
+        <li><strong>Step 6</strong> uses <code>confirmCompromised</code>, which <strong>always produces High risk</strong> — it is an explicit admin assertion and Entra treats it as the highest-confidence signal.</li>
+        <li><strong>Medium and Low</strong> risk levels are generated <strong>automatically</strong> by Entra's ML-based detections when real anomalous behavior is observed in production (sign-in from a TOR exit node, unusual geography, rapid multi-resource access).</li>
+        <li>These <strong>cannot be easily simulated</strong> in a lab without generating genuinely anomalous traffic patterns.</li>
+      </ul>
+    </div>
+    <div class="card" style="margin:0">
+      <h3 class="first">🎯 Why the CA policy targets Medium <em>and</em> High</h3>
+      <p style="font-size:0.9rem;margin-top:0">In <strong>Step 5</strong> the policy triggers on both Medium and High risk. That ensures, in production:</p>
+      <ul class="tight">
+        <li><strong>Admin-confirmed compromises</strong> (High) → blocked immediately</li>
+        <li><strong>ML-detected anomalies</strong> (Medium) → also caught and blocked before escalation</li>
+        <li><strong>Low risk is excluded</strong> to avoid false positives on minor behavioral noise</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHY CONFIRM ============ -->
+<section id="whyconfirm">
+  <h2>🤔 Why we use <span class="mono" style="font-size:0.85em">confirmCompromised</span> in the POC</h2>
+  <p class="lede">The single most common customer question — and the answer that keeps the demo credible.</p>
+
+  <div class="card">
+    <div class="qa">
+      <div class="q">Why don't these activities automatically surface the SP in the Risky workload identities blade?</div>
+      <div class="a">The blade only shows service principals that have a <strong>risk detection</strong> attached. Risk detections are created in exactly two ways: automatically by Entra's ML engine and Microsoft Threat Intelligence, or manually by an admin confirming compromise.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first">1️⃣ Automatic detections (production)</h3>
+    <p style="font-size:0.9rem;margin-top:0">In a production tenant, Entra's ML engine and Microsoft Threat Intelligence <strong>automatically</strong> create risk detections. In a fresh POC tenant, none of them can fire — and here's precisely why:</p>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Detection</th><th>How it works</th><th>Why it won't fire in a POC</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">anomalousServicePrincipalActivity</span></td>
+            <td>ML compares current sign-in behavior against the SP's <strong>historical baseline</strong> (IP ranges, resources accessed, timing patterns)</td>
+            <td><strong>No baseline exists.</strong> These SPs were created minutes ago. Entra needs <strong>weeks of sign-in history</strong> to establish what's "normal" before it can detect what's "anomalous."</td>
+          </tr>
+          <tr>
+            <td><span class="mono">suspiciousSignIns</span></td>
+            <td>ML detects unusual IP, impossible travel, or known malicious infrastructure</td>
+            <td><strong>New SPs have no "usual" IP.</strong> Every IP is equally new — there's nothing to flag as unusual.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">leakedCredentials</span></td>
+            <td>Microsoft scans GitHub, paste sites, and the dark web for exposed Azure credentials</td>
+            <td><strong>Only fires if credentials are actually published</strong> to a source Microsoft monitors. This takes ~8 hours even when deliberately triggered.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">maliciousApplication</span></td>
+            <td>Microsoft Threat Intelligence flags apps associated with known attack campaigns</td>
+            <td><strong>Only applies to apps in Microsoft's threat database</strong> — test apps won't match.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first">2️⃣ Manual confirmation (POC <em>and</em> production)</h3>
+    <p style="font-size:0.9rem;margin-top:0">The <code>confirmCompromised</code> API creates an <span class="mono">adminConfirmedServicePrincipalCompromised</span> risk detection. This is <strong>not a POC-only workaround</strong> — it is a production feature used by SOC teams as their <strong>response action</strong> when they discover a compromised SP through:</p>
+    <div class="grid2">
+      <div class="kvi" style="background:var(--cp-surface-soft);border:1px solid var(--cp-border);border-radius:0.625rem;padding:11px 14px;font-size:0.85rem">🛰️ SIEM alerts (Sentinel, Splunk)</div>
+      <div class="kvi" style="background:var(--cp-surface-soft);border:1px solid var(--cp-border);border-radius:0.625rem;padding:11px 14px;font-size:0.85rem">📜 Audit log monitoring rules</div>
+      <div class="kvi" style="background:var(--cp-surface-soft);border:1px solid var(--cp-border);border-radius:0.625rem;padding:11px 14px;font-size:0.85rem">🎯 Threat intelligence feeds</div>
+      <div class="kvi" style="background:var(--cp-surface-soft);border:1px solid var(--cp-border);border-radius:0.625rem;padding:11px 14px;font-size:0.85rem">🚑 Incident response investigations</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first">🎤 How to explain this to your customer</h3>
+    <blockquote>
+      "In production, Entra's ML builds a behavioral baseline for each service principal over weeks of sign-in data. When behavior deviates — a new resource, a new IP, a burst pattern — the SP automatically appears in the Risky workload identities blade without admin action.
+      <br><br>
+      In this POC, these SPs are brand new with no history, so the ML has no baseline to compare against. We use <span class="mono">confirmCompromised</span> to simulate the end-state — this is the same API your SOC would call after investigating a real alert.
+      <br><br>
+      <strong>The Conditional Access enforcement is identical regardless of the source.</strong> Whether the risk came from ML detection or admin confirmation, the block is the same <span class="mono">AADSTS53003</span>."
+      <span class="attrib">Use verbatim — it pre-empts the "so this is fake" objection.</span>
+    </blockquote>
+  </div>
+
+  <div class="card">
+    <h3 class="first">📅 What happens in production after deployment</h3>
+    <p style="font-size:0.9rem;margin-top:0">Once the customer deploys the CA policy in their real tenant:</p>
+    <div class="pipe">
+      <div class="pipe-step">
+        <div class="pn">WEEK 1–2</div>
+        <div class="pt">Baselines build</div>
+        <div class="pd">Entra begins building behavioral baselines for each SP — sign-in patterns, resource access, IP ranges.</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pn">WEEK 3+</div>
+        <div class="pt">Anomalies fire</div>
+        <div class="pd">Anomaly detections start firing automatically — no admin action required.</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pn">ONGOING</div>
+        <div class="pt">Credential scanning</div>
+        <div class="pd">Leaked credential scanning runs continuously against Microsoft's threat intel feeds.</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pn">ANYTIME</div>
+        <div class="pt">Manual override</div>
+        <div class="pd">SOC can still use <span class="mono">confirmCompromised</span> for manual overrides based on external intelligence.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TEST SETUP ============ -->
+<section id="testsetup">
+  <h2>🧪 Additional risk simulation tests — SP setup</h2>
+  <p class="lede">All tests focus exclusively on Service Principal / Workload Identity scenarios. Each test uses a <strong>dedicated</strong> service principal so every scenario appears as a separate entry in the Risky workload identities blade.</p>
+
+  <div class="card">
+    <h4 class="first">Creating separate SPs per test</h4>
+    <p style="font-size:0.9rem;margin-top:0">For each test (A–D), create a separate app registration and service principal following the same process as <a class="ref" href="#setup">Steps 1–3</a> of the core POC. Use these naming conventions:</p>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Test</th><th>App registration name</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="badge b-blue">A</span></td><td><span class="mono">POC-Test-A-AdminConfirm</span></td><td>Admin confirms compromised</td></tr>
+          <tr><td><span class="badge b-blue">B</span></td><td><span class="mono">POC-Test-B-BackdoorCred</span></td><td>Suspicious credential addition</td></tr>
+          <tr><td><span class="badge b-blue">C</span></td><td><span class="mono">POC-Test-C-FabricAccess</span></td><td>Fabric access with risky SP</td></tr>
+          <tr><td><span class="badge b-blue">D</span></td><td><span class="mono">POC-Test-D-BurstSignIn</span></td><td>Multi-resource burst sign-in</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <span class="lbl">📋 For each app</span>
+      Create a client secret (<code>POC-Secret</code>), note the <strong>Application (client) ID</strong>, and note the <strong>Service Principal Object ID</strong> from Enterprise Applications.
+    </div>
+    <div class="callout good" style="margin-bottom:0">
+      <span class="lbl">♻️ Test E reuses an existing SP</span>
+      Test E (CA enforcement) reuses any of the above service principals — it demonstrates the <em>block mechanism</em>, not a unique risk scenario.
+    </div>
+  </div>
+
+  <div class="card">
+    <h4 class="first">Reference</h4>
+    <p style="font-size:0.9rem;margin:0"><a class="ref" href="https://learn.microsoft.com/entra/id-protection/howto-identity-protection-simulate-risk">Simulate risk detections in Microsoft Entra ID Protection →</a></p>
+  </div>
+</section>
+
+<!-- ============ TEST A ============ -->
+<section id="testa">
+  <h2>🚨 Test A — Admin confirms SP compromised</h2>
+  <p class="lede"><strong>What it proves:</strong> an admin can manually flag a service principal as compromised, immediately raising it to High risk and triggering CA evaluation.</p>
+
+  <div class="card">
+    <h3 class="first">Service principal: <span class="mono">POC-Test-A-AdminConfirm</span></h3>
+    <blockquote class="scenario">
+      <span class="lbl">🎬 Why this SP is confirmed compromised</span>
+      Microsoft Threat Intelligence or an internal breach notification reports that this SP's credentials appeared in a <strong>phishing kit or C2 infrastructure</strong>. The SOC investigates, confirms the exposure, and marks the SP as compromised to immediately trigger Conditional Access protection.
+    </blockquote>
+
+    <h4>Steps</h4>
+    <ol class="tight">
+      <li><strong>Generate a sign-in for the SP</strong> (so it has activity in the tenant):</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$body</span> = @{
+    grant_type    = <span class="s">"client_credentials"</span>
+    client_id     = <span class="s">"&lt;POC-Test-A Application (client) ID&gt;"</span>
+    client_secret = <span class="s">"&lt;POC-Test-A Secret Value&gt;"</span>
+    scope         = <span class="s">"https://graph.microsoft.com/.default"</span>
+}
+<span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/&lt;Your Tenant ID&gt;/oauth2/v2.0/token"</span> `
+    -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span></pre>
+    </div>
+    <ol class="tight" start="2">
+      <li><strong>Confirm compromised</strong> via Graph Explorer or PowerShell:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">Graph</span>
+<pre><span class="p">POST</span> <span class="s">https://graph.microsoft.com/v1.0/identityProtection/riskyServicePrincipals/confirmCompromised</span>
+
+{
+  <span class="k">"servicePrincipalIds"</span>: [<span class="s">"&lt;POC-Test-A Service Principal Object ID&gt;"</span>]
+}</pre>
+    </div>
+    <ol class="tight" start="3">
+      <li>Verify in <span class="path"><b>Protection</b> → Identity Protection → Risky workload identities</span></li>
+    </ol>
+
+    <h4>Key results</h4>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Risk state</div>Confirmed compromised</div>
+      <div class="kvi"><div class="kk">Risk level</div><span class="badge b-red">High</span></div>
+      <div class="kvi"><div class="kk">Detection type</div><span class="mono">adminConfirmedServicePrincipalCompromised</span></div>
+      <div class="kvi"><div class="kk">MITRE technique</div><span class="badge b-warn">T1078</span> Valid Accounts</div>
+      <div class="kvi"><div class="kk">Time to appear</div>Immediate — within 1–2 minutes</div>
+    </div>
+
+    <h4>What to show the customer</h4>
+    <ul class="tight">
+      <li>This is the manual <strong>"emergency brake"</strong> — any SOC analyst with the right permissions can immediately flag a workload identity.</li>
+      <li>In production, this is used when threat intel, SIEM alerts, or incident response discovers a compromised SP.</li>
+      <li>The risk state <strong>persists until explicitly dismissed</strong>, ensuring CA enforcement stays active.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ TEST B ============ -->
+<section id="testb">
+  <h2>🔑 Test B — Suspicious credential addition (backdoor persistence)</h2>
+  <p class="lede"><strong>What it proves:</strong> an attacker who gains access to an app registration can add a second client secret as a persistence mechanism. This is detectable via audit logs and warrants confirming the SP as compromised.</p>
+
+  <div class="card">
+    <h3 class="first">Service principal: <span class="mono">POC-Test-B-BackdoorCred</span></h3>
+    <blockquote class="scenario">
+      <span class="lbl">🎬 Why this SP is confirmed compromised</span>
+      The SOC's audit log monitoring rule fires on <span class="mono">Update application – Certificates and secrets management</span>. Investigation reveals that an unknown actor added a second credential named <span class="mono">backdoor-secret</span> to an existing application. This is a classic <strong>persistence attack</strong> — MITRE ATT&amp;CK <strong>T1098.001</strong> (Account Manipulation: Additional Cloud Credentials). The attacker now has their own key to the application, independent of the original secret. The SOC confirms the SP as compromised to trigger Conditional Access protection while the incident is investigated.
+    </blockquote>
+
+    <h4>Steps</h4>
+    <ol class="tight">
+      <li><strong>Generate a baseline sign-in</strong> for the SP:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$body</span> = @{
+    grant_type    = <span class="s">"client_credentials"</span>
+    client_id     = <span class="s">"&lt;POC-Test-B Application (client) ID&gt;"</span>
+    client_secret = <span class="s">"&lt;POC-Test-B Secret Value&gt;"</span>
+    scope         = <span class="s">"https://graph.microsoft.com/.default"</span>
+}
+<span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/&lt;Your Tenant ID&gt;/oauth2/v2.0/token"</span> `
+    -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span></pre>
+    </div>
+
+    <ol class="tight" start="2">
+      <li><strong>Simulate the attacker adding a backdoor credential</strong>:
+        <ul class="tight">
+          <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Applications → App registrations</span></li>
+          <li>Find <code>POC-Test-B-BackdoorCred</code> → <strong>Certificates &amp; secrets</strong></li>
+          <li>Click <strong>+ New client secret</strong></li>
+          <li>Enter description: <code>backdoor-secret</code> → click <strong>Add</strong></li>
+          <li>The app now has <strong>2 credentials</strong> — the original <code>POC-Secret</code> and the attacker's <code>backdoor-secret</code></li>
+        </ul>
+      </li>
+      <li><strong>Verify the audit trail</strong> (wait 15–20 minutes for audit log propagation):
+        <ul class="tight">
+          <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Monitoring → Audit logs</span></li>
+          <li>Filter by <strong>Service</strong>: <code>Core Directory</code>, <strong>Activity</strong>: <span class="mono">Update application – Certificates and secrets management</span></li>
+          <li>Find the entry for <code>POC-Test-B-BackdoorCred</code></li>
+          <li>The <strong>Modified Properties</strong> section shows the <span class="mono">KeyDescription</span> field now containing both credentials</li>
+        </ul>
+      </li>
+    </ol>
+    <p style="font-size:0.88rem;color:var(--cp-text-muted);margin-bottom:4px">Or query via Graph Explorer / PowerShell:</p>
+    <div class="codeblock">
+      <span class="lang">Graph</span>
+<pre><span class="p">GET</span> <span class="s">https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?</span>
+  <span class="v">$filter</span>=targetResources/any(t: t/displayName eq <span class="s">'POC-Test-B-BackdoorCred'</span>)
+  &amp;<span class="v">$top</span>=5&amp;<span class="v">$orderby</span>=activityDateTime desc</pre>
+    </div>
+
+    <ol class="tight" start="4">
+      <li><strong>SOC responds — confirm the SP as compromised</strong>:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">Graph</span>
+<pre><span class="p">POST</span> <span class="s">https://graph.microsoft.com/v1.0/identityProtection/riskyServicePrincipals/confirmCompromised</span>
+
+{
+  <span class="k">"servicePrincipalIds"</span>: [<span class="s">"&lt;POC-Test-B Service Principal Object ID&gt;"</span>]
+}</pre>
+    </div>
+    <ol class="tight" start="5">
+      <li><strong>Remove the backdoor credential</strong> (remediation):
+        <ul class="tight">
+          <li>Go to <span class="path">App registrations → <code>POC-Test-B-BackdoorCred</code> → Certificates &amp; secrets</span></li>
+          <li>Delete the <code>backdoor-secret</code> entry</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h4>Key results</h4>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Audit log evidence</div><span class="mono">Update application – Certificates and secrets management</span> shows the credential addition</div>
+      <div class="kvi"><div class="kk">Risk state</div>Confirmed compromised — SOC response to detection</div>
+      <div class="kvi"><div class="kk">Risk level</div><span class="badge b-red">High</span></div>
+      <div class="kvi"><div class="kk">Attack technique</div><span class="badge b-warn">T1098.001</span> Additional Cloud Credentials</div>
+    </div>
+
+    <h4>What to show the customer</h4>
+    <ul class="tight">
+      <li>Adding a credential to an app registration is a <strong>silent persistence technique</strong> — no alert by default.</li>
+      <li>The audit log captures every credential change with the actor's identity and the modified properties.</li>
+      <li>SOC teams should create <strong>monitoring rules</strong> (Sentinel, Splunk, or another SIEM) to alert on <span class="mono">Update application – Certificates and secrets management</span> events.</li>
+      <li>Once detected, confirming the SP as compromised immediately triggers CA enforcement across all resources.</li>
+      <li>The remediation workflow: <strong>remove the rogue credential → rotate the legitimate secret → dismiss the risk</strong>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ TEST C ============ -->
+<section id="testc">
+  <h2>📊 Test C — Anomalous Fabric access by a workload identity</h2>
+  <p class="lede"><strong>What it proves:</strong> a service principal that has never accessed Fabric suddenly requests a Fabric token — this anomalous resource-access pattern is a risk indicator, and CA can block it.</p>
+
+  <div class="card">
+    <h3 class="first">Service principal: <span class="mono">POC-Test-C-FabricAccess</span></h3>
+    <blockquote class="scenario">
+      <span class="lbl">🎬 Why this SP is confirmed compromised</span>
+      Sign-in logs show that <span class="mono">POC-Test-C-FabricAccess</span> requested a token for Power BI / Fabric <strong>for the first time ever</strong>. This SP was originally provisioned to access only Azure SQL. A sudden pivot to Fabric suggests an attacker is using compromised credentials to explore what data they can reach. The SOC investigates the anomalous resource access and confirms the SP as compromised.
+    </blockquote>
+
+    <h4>Prerequisites</h4>
+    <ul class="tight">
+      <li>A <strong>Microsoft Fabric capacity</strong> provisioned in your tenant (even a trial capacity works)</li>
+      <li><strong>Fabric API permissions</strong> granted to the service principal</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum sub">Step C.1</span> Grant Fabric API permissions to the SP</h3>
+    <ol class="tight">
+      <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Applications → App registrations</span></li>
+      <li>Select <code>POC-Test-C-FabricAccess</code></li>
+      <li>Go to <strong>API permissions</strong> → <strong>+ Add a permission</strong></li>
+      <li>Select <strong>APIs my organization uses</strong> → search for <code>Power BI Service</code> (Fabric uses the Power BI API surface)</li>
+      <li>Select <strong>Application permissions</strong> → check <strong>Tenant.Read.All</strong> (or <strong>Workspace.Read.All</strong> for more limited scope)</li>
+      <li>Click <strong>Add permissions</strong></li>
+      <li>Click <strong>Grant admin consent for &lt;Your Tenant&gt;</strong> → <strong>Yes</strong></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum sub">Step C.2</span> Access Fabric (anomalous first-time access)</h3>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$body</span> = @{
+    grant_type    = <span class="s">"client_credentials"</span>
+    client_id     = <span class="s">"&lt;POC-Test-C Application (client) ID&gt;"</span>
+    client_secret = <span class="s">"&lt;POC-Test-C Secret Value&gt;"</span>
+    scope         = <span class="s">"https://analysis.windows.net/powerbi/api/.default"</span>
+}
+<span class="v">$token</span> = (<span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/&lt;Your Tenant ID&gt;/oauth2/v2.0/token"</span> `
+    -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span>).access_token
+
+<span class="c"># Call Fabric/Power BI API to list workspaces</span>
+<span class="v">$headers</span> = @{ Authorization = <span class="s">"Bearer <span class="v">$token</span>"</span> }
+<span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://api.fabric.microsoft.com/v1/workspaces"</span> `
+    -Headers <span class="v">$headers</span> -Method GET</pre>
+    </div>
+    <p style="font-size:0.9rem">Confirm you get a response listing Fabric workspaces — it may be empty, and that's fine. The point is that the SP now has <strong>Fabric activity in sign-in logs</strong>.</p>
+    <div class="callout" style="margin-bottom:0">
+      <span class="lbl">🎤 Key point for the customer</span>
+      In production, Entra's ML engine would detect this as <span class="mono">anomalousServicePrincipalActivity</span> — an SP that historically only accesses SQL suddenly pivoting to Fabric. In the POC, we simulate the SOC's <em>response</em> to that detection.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum sub">Step C.3</span> SOC responds: confirm compromised</h3>
+    <div class="codeblock">
+      <span class="lang">Graph</span>
+<pre><span class="p">POST</span> <span class="s">https://graph.microsoft.com/v1.0/identityProtection/riskyServicePrincipals/confirmCompromised</span>
+
+{
+  <span class="k">"servicePrincipalIds"</span>: [<span class="s">"&lt;POC-Test-C Service Principal Object ID&gt;"</span>]
+}</pre>
+    </div>
+    <p style="font-size:0.9rem;margin-bottom:0">Click <strong>Run query</strong> — expect <strong>204 No Content</strong>.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card" style="margin:0">
+      <h3 class="first"><span class="stepnum sub">Step C.4</span> Report-only</h3>
+      <ol class="tight">
+        <li>Re-run the exact same PowerShell from <strong>Step C.2</strong></li>
+        <li>With the CA policy in <strong>report-only</strong> mode:
+          <ul class="tight">
+            <li>The Fabric API call will <strong>succeed</strong></li>
+            <li>But the CA decision is <strong>logged</strong> in sign-in logs</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+    <div class="card" style="margin:0">
+      <h3 class="first"><span class="stepnum sub">Step C.5</span> Block mode</h3>
+      <ol class="tight">
+        <li>Go to <span class="path"><b>Conditional Access</b> → Policies</span> → open <code>POC - Block Risky Workload Identities</code></li>
+        <li>Change <strong>Enable policy</strong> to <strong>On</strong> → <strong>Save</strong></li>
+        <li>Re-run the PowerShell from Step C.2</li>
+        <li>The token request will <strong>fail</strong>: <span class="mono" style="color:var(--cp-danger)">AADSTS53003</span> — Access has been blocked by Conditional Access policies. <strong>The SP cannot obtain a token for Fabric at all.</strong></li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="first"><span class="stepnum sub">Step C.6</span> Verify in sign-in logs</h3>
+    <ol class="tight">
+      <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Monitoring → Sign-in logs</span></li>
+      <li>Switch to <strong>Service principal sign-ins</strong></li>
+      <li>Filter by <strong>Application</strong>: <code>POC-Test-C-FabricAccess</code></li>
+      <li>Click into the sign-in entries:
+        <ul class="tight">
+          <li><strong>Resource</strong>: <span class="mono">Power BI Service</span> (Fabric)</li>
+          <li><strong>Conditional Access</strong> tab shows the policy and result (<span class="mono">reportOnlyFailure</span> or <span class="mono">failure</span>)</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h4>What to show the customer</h4>
+    <ul class="tight">
+      <li>An SP that suddenly accesses a new resource it never used before is a <strong>red flag</strong> — this is the kind of behavioral anomaly Entra's ML detects in production.</li>
+      <li>Workload Identity Protection works across <strong>all Entra-integrated resources</strong>, including Fabric.</li>
+      <li>A compromised SP is blocked from accessing Fabric <em>even though it has valid API permissions</em>.</li>
+      <li>The CA policy applies at the <strong>token issuance layer</strong> — the SP never gets a token, so it can't call any Fabric API.</li>
+      <li>This same protection extends to Azure Resource Manager, Key Vault, SQL, Storage, and any OAuth-protected resource.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ TEST D ============ -->
+<section id="testd">
+  <h2>💥 Test D — Multi-resource burst sign-in (lateral movement pattern)</h2>
+  <p class="lede"><strong>What it proves:</strong> a service principal authenticating across many different Azure resources in a short burst mirrors lateral movement — an attacker enumerating what resources the SP can reach.</p>
+
+  <div class="card">
+    <h3 class="first">Service principal: <span class="mono">POC-Test-D-BurstSignIn</span></h3>
+    <blockquote class="scenario">
+      <span class="lbl">🎬 Why this SP is confirmed compromised</span>
+      The SOC's SIEM correlation rule detects that <span class="mono">POC-Test-D-BurstSignIn</span> authenticated to <strong>7 different Azure resources within 10 seconds</strong> — Graph API, ARM, Key Vault, Storage, SQL, Power BI, and Fabric. This SP normally only accesses Azure SQL. The burst pattern is consistent with an attacker enumerating what the compromised credential can reach (MITRE <strong>T1078</strong> — Valid Accounts + <strong>T1087</strong> — Account Discovery). The SOC confirms the SP as compromised.
+    </blockquote>
+
+    <h4>Steps</h4>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$tenantId</span>     = <span class="s">"&lt;Your Tenant ID&gt;"</span>
+<span class="v">$clientId</span>     = <span class="s">"&lt;POC-Test-D Application (client) ID&gt;"</span>
+<span class="v">$clientSecret</span> = <span class="s">"&lt;POC-Test-D Secret Value&gt;"</span>
+
+<span class="v">$resources</span> = @(
+    <span class="s">"https://graph.microsoft.com/.default"</span>,
+    <span class="s">"https://management.azure.com/.default"</span>,
+    <span class="s">"https://vault.azure.net/.default"</span>,
+    <span class="s">"https://storage.azure.com/.default"</span>,
+    <span class="s">"https://database.windows.net/.default"</span>,
+    <span class="s">"https://analysis.windows.net/powerbi/api/.default"</span>,
+    <span class="s">"https://api.fabric.microsoft.com/.default"</span>
+)
+
+<span class="k">foreach</span> (<span class="v">$scope</span> <span class="k">in</span> <span class="v">$resources</span>) {
+    <span class="v">$body</span> = @{
+        grant_type    = <span class="s">"client_credentials"</span>
+        client_id     = <span class="v">$clientId</span>
+        client_secret = <span class="v">$clientSecret</span>
+        scope         = <span class="v">$scope</span>
+    }
+    <span class="k">try</span> {
+        <span class="v">$r</span> = <span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/<span class="v">$tenantId</span>/oauth2/v2.0/token"</span> `
+            -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span>
+        <span class="k">Write-Host</span> <span class="s">"OK: <span class="v">$scope</span>"</span>
+    } <span class="k">catch</span> {
+        <span class="k">Write-Host</span> <span class="s">"FAIL: <span class="v">$scope</span> (expected if no API permission)"</span>
+    }
+    <span class="k">Start-Sleep</span> -Seconds <span class="p">1</span>
+}</pre>
+    </div>
+    <p style="font-size:0.9rem">This generates sign-in events across <strong>7 different Azure resources</strong> in rapid succession.</p>
+
+    <h4>SOC responds — confirm the SP as compromised</h4>
+    <div class="codeblock">
+      <span class="lang">Graph</span>
+<pre><span class="p">POST</span> <span class="s">https://graph.microsoft.com/v1.0/identityProtection/riskyServicePrincipals/confirmCompromised</span>
+
+{
+  <span class="k">"servicePrincipalIds"</span>: [<span class="s">"&lt;POC-Test-D Service Principal Object ID&gt;"</span>]
+}</pre>
+    </div>
+
+    <h4>Verify</h4>
+    <ol class="tight">
+      <li>Wait <strong>15–30 minutes</strong> for sign-in logs to populate</li>
+      <li>Go to <span class="path">Entra admin center → <b>Identity</b> → Monitoring → Sign-in logs → Service principal sign-ins</span></li>
+      <li>Filter by <code>POC-Test-D-BurstSignIn</code> — you should see sign-in entries for each resource</li>
+      <li>In production, this burst pattern would trigger Entra's ML-based detection of <span class="mono">anomalousServicePrincipalActivity</span></li>
+      <li>Verify the SP appears in <span class="path"><b>Protection</b> → Identity Protection → Risky workload identities</span></li>
+    </ol>
+
+    <h4>What to show the customer</h4>
+    <ul class="tight">
+      <li>A legitimate SP typically accesses 1–2 resources — a burst across <strong>7 resources is a red flag</strong> for lateral movement.</li>
+      <li>Entra's ML engine uses this pattern data to build behavioral baselines for each SP.</li>
+      <li>In production, if the SP shifts to accessing new resources it never used before, Entra flags it as <strong>Medium risk automatically</strong>.</li>
+      <li>In the POC, the SOC manually confirms compromised to simulate the end-state of that automated detection.</li>
+      <li>This is <strong>invisible to the attacker</strong> — no agent or sensor required, just token issuance telemetry.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ TEST E ============ -->
+<section id="teste">
+  <h2>🛑 Test E — CA enforcement: full block demonstration</h2>
+  <p class="lede"><strong>What it proves:</strong> switching the CA policy from report-only to enforce mode <strong>immediately blocks</strong> a risky SP from obtaining tokens for any resource.</p>
+
+  <div class="card">
+    <h4 class="first">Steps</h4>
+    <ol class="tight">
+      <li><strong>Ensure the SP is marked as compromised</strong> — POST to <span class="mono">confirmCompromised</span> with body <span class="mono">{"servicePrincipalIds": ["&lt;Service Principal Object ID&gt;"]}</span>, then wait <strong>1–2 minutes</strong> for risk to propagate.</li>
+      <li><strong>Verify the SP is risky</strong> — <span class="path"><b>Protection</b> → Identity Protection → Risky workload identities</span> → confirm <code>POC-RiskyWorkloadIdentity</code> shows <span class="badge b-red">High</span> risk.</li>
+      <li><strong>Switch the CA policy to enforce mode</strong> — <span class="path"><b>Protection</b> → Conditional Access → Policies</span> → open <code>POC - Block Risky Workload Identities</code> → change <strong>Enable policy</strong> from <strong>Report-only</strong> to <strong>On</strong> → <strong>Save</strong>.</li>
+      <li>Wait <strong>1–2 minutes</strong> for policy propagation.</li>
+      <li><strong>Test the block</strong> — run this in PowerShell:</li>
+    </ol>
+    <div class="codeblock">
+      <span class="lang">PowerShell</span>
+<pre><span class="v">$body</span> = @{
+    grant_type    = <span class="s">"client_credentials"</span>
+    client_id     = <span class="s">"&lt;Application (client) ID&gt;"</span>
+    client_secret = <span class="s">"&lt;Secret Value&gt;"</span>
+    scope         = <span class="s">"https://graph.microsoft.com/.default"</span>
+}
+<span class="k">try</span> {
+    <span class="k">Invoke-RestMethod</span> -Uri <span class="s">"https://login.microsoftonline.com/&lt;Your Tenant ID&gt;/oauth2/v2.0/token"</span> `
+        -Method POST -Body <span class="v">$body</span> -ContentType <span class="s">"application/x-www-form-urlencoded"</span>
+    <span class="k">Write-Host</span> <span class="s">"NOT BLOCKED (unexpected)"</span>
+} <span class="k">catch</span> {
+    <span class="k">Write-Host</span> <span class="s">"BLOCKED!"</span> -ForegroundColor Red
+    <span class="v">$_</span>.ErrorDetails.Message | <span class="k">ConvertFrom-Json</span> | <span class="k">Select-Object</span> error, error_description | <span class="k">Format-List</span>
+}</pre>
+    </div>
+    <ol class="tight" start="6">
+      <li>You should see:</li>
+    </ol>
+    <div class="kv">
+      <div class="kvi"><div class="kk">Error</div><span class="mono" style="color:var(--cp-danger)">AADSTS53003</span></div>
+      <div class="kvi"><div class="kk">Message</div><span class="mono">Access has been blocked by Conditional Access policies. The access policy does not allow token issuance.</span></div>
+    </div>
+    <ol class="tight" start="7">
+      <li><strong>Try multiple resources</strong> — Graph, Fabric, ARM, Key Vault — they should <strong>ALL</strong> be blocked.</li>
+      <li><strong>Revert</strong> the CA policy to report-only after the demo: change <strong>Enable policy</strong> back to <strong>Report-only</strong> → <strong>Save</strong>.</li>
+    </ol>
+    <div class="callout stop">
+      <span class="lbl">⚠️ Don't leave the demo in enforce mode</span>
+      Step 8 is not optional housekeeping — reverting to report-only is what keeps this POC "no production impact" if the SPs are ever reused or the policy scope is later widened.
+    </div>
+
+    <h4>What to show the customer</h4>
+    <ul class="tight">
+      <li>The block happens at the <strong>token issuance layer</strong> — the SP can't get a token for <em>any</em> resource.</li>
+      <li>The error code <span class="mono">AADSTS53003</span> clearly identifies Conditional Access as the reason.</li>
+      <li>Switching between report-only and enforce is <strong>instant</strong> — no downtime, no app changes.</li>
+      <li>In production, SOC teams can enforce the policy to immediately <strong>contain</strong> a compromised SP.</li>
+      <li>After investigation, dismiss the risk to restore access — no secret rotation needed if the SP wasn't actually compromised.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section id="results">
+  <h2>📋 Test results summary</h2>
+  <p class="lede">Five scenarios, five service principals, one enforcement mechanism.</p>
+
+  <div class="card">
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Test</th><th>SP name</th><th>Real-world trigger</th><th>Why confirmed compromised</th><th>Risk level</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>A</strong> — Admin confirms</td>
+            <td><span class="mono">POC-Test-A-AdminConfirm</span></td>
+            <td>Threat intel / breach report</td>
+            <td>SP credentials found in attacker infrastructure</td>
+            <td><span class="badge b-red">High</span></td>
+          </tr>
+          <tr>
+            <td><strong>B</strong> — Backdoor credential</td>
+            <td><span class="mono">POC-Test-B-BackdoorCred</span></td>
+            <td>Audit log detection</td>
+            <td>Unauthorized second secret added (T1098.001)</td>
+            <td><span class="badge b-red">High</span></td>
+          </tr>
+          <tr>
+            <td><strong>C</strong> — Anomalous Fabric access</td>
+            <td><span class="mono">POC-Test-C-FabricAccess</span></td>
+            <td>Anomalous resource access</td>
+            <td>SP accessed Fabric for the first time ever</td>
+            <td><span class="badge b-red">High</span></td>
+          </tr>
+          <tr>
+            <td><strong>D</strong> — Burst sign-in</td>
+            <td><span class="mono">POC-Test-D-BurstSignIn</span></td>
+            <td>SIEM correlation rule</td>
+            <td>SP authenticated to 7 resources in seconds (lateral movement)</td>
+            <td><span class="badge b-red">High</span></td>
+          </tr>
+          <tr>
+            <td><strong>E</strong> — CA enforce block</td>
+            <td>Any of the above</td>
+            <td>Conditional Access enforcement</td>
+            <td>Demonstrates <span class="mono">AADSTS53003</span> block on any risky SP</td>
+            <td><span class="badge b-red">High</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn" style="margin-bottom:0">
+      <span class="lbl">📌 Note</span>
+      In the POC, <code>confirmCompromised</code> is used to simulate the end-state of each detection. In production, Tests B, C, and D would generate <strong>automated</strong> risk signals via Entra's ML engine, audit log monitoring, or SIEM rules — the SOC's response of confirming compromised is the same either way.
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLEANUP ============ -->
+<section id="cleanup">
+  <h2>🧹 Cleanup</h2>
+  <p class="lede">When the POC is complete, clean up all test resources. Do this in order — reverting the policy first avoids blocking yourself out of the deletion steps.</p>
+
+  <div class="card">
+    <ol class="tight">
+      <li><strong>Revert the CA policy</strong> — if in enforce mode, switch back to <strong>report-only</strong> or delete the policy.
+        <ul class="tight"><li><span class="path"><b>Protection</b> → Conditional Access → Policies → <code>POC - Block Risky Workload Identities</code></span></li></ul>
+      </li>
+      <li><strong>Dismiss all risks</strong> — <span class="path"><b>Protection</b> → Identity Protection → Risky workload identities</span> → select all POC SPs → click <strong>Dismiss risk</strong>.</li>
+      <li><strong>Delete the app registrations</strong> (this also removes the associated service principals):
+        <ul class="tight">
+          <li><code>POC-RiskyWorkloadIdentity</code> (Core POC)</li>
+          <li><code>POC-Test-A-AdminConfirm</code></li>
+          <li><code>POC-Test-B-BackdoorCred</code></li>
+          <li><code>POC-Test-C-FabricAccess</code></li>
+          <li><code>POC-Test-D-BurstSignIn</code></li>
+          <li><code>POC-LeakedCredentialTest</code> (if created)</li>
+        </ul>
+      </li>
+      <li><strong>Remove Fabric API permissions</strong> — if any test SPs were granted <code>Tenant.Read.All</code> on Power BI Service, the deletion above handles it.</li>
+      <li><strong>Delete the CA policy</strong> if no longer needed.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ SUMMARY ============ -->
+<section id="summary">
+  <h2>✅ Requirements coverage</h2>
+  <p class="lede">Every POC requirement, mapped to the artefact that proves it.</p>
+
+  <div class="card">
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>Requirement</th><th>How it was demonstrated</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>SP as Risky Workload Identity</strong></td><td>5 separate SPs confirmed compromised — all visible in the Identity Protection blade</td></tr>
+          <tr><td><strong>Risk signal with MITRE mapping</strong></td><td>Each SP has a prescriptive reason: threat intel (A), credential backdoor T1098.001 (B), anomalous resource access (C), lateral movement burst T1078/T1087 (D)</td></tr>
+          <tr><td><strong>Conditional Access decision (report-only)</strong></td><td>Report-only policy evaluated on risky SP sign-ins, logged in sign-in logs</td></tr>
+          <tr><td><strong>Conditional Access enforcement (block)</strong></td><td>Enforce mode → <span class="mono">AADSTS53003</span> error — SP blocked from ALL resources</td></tr>
+          <tr><td><strong>Suspicious credential detection</strong></td><td>Backdoor secret added to app → captured in audit logs → SOC confirms compromised</td></tr>
+          <tr><td><strong>Fabric protection</strong></td><td>Risky SP blocked from Fabric / Power BI API via Conditional Access</td></tr>
+          <tr><td><strong>Multi-resource anomaly</strong></td><td>SP burst across 7 resources generates trackable sign-in patterns</td></tr>
+          <tr><td><strong>No production impact</strong></td><td>Isolated test SPs, short-lived secrets, report-only mode</td></tr>
+          <tr><td><strong>License required</strong></td><td>Microsoft Entra Workload Identities Premium (standalone license)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="text-align:center;font-size:0.92rem;padding:6px 0">
+      🏗️ <strong>SP created</strong> &nbsp;→&nbsp; 🚨 <strong>Risk confirmed</strong> &nbsp;→&nbsp; 📋 <strong>CA evaluated</strong> &nbsp;→&nbsp; 🛑 <strong>Token blocked</strong> &nbsp;↺&nbsp; <em>then dismissed and cleaned up</em>
+    </div>
+  </div>
+</section>
+
+<footer>
+  🛡️ Workload Identity Protection POC — Step-by-Step Guide (Portal) · Microsoft Entra ID Protection + Conditional Access<br>
+  Internal enablement material — contains no tenant-specific secrets. Run the Cleanup section when the POC concludes.
+</footer>
+
+</main>
+</div>
+
+<script>
+  const sections = Array.from(document.querySelectorAll("section[id]"));
+  const links = Array.from(document.querySelectorAll("nav a"));
+  const byHash = {};
+  links.forEach(l => byHash[l.getAttribute("href").slice(1)] = l);
+
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove("active"));
+        const link = byHash[e.target.id];
+        if (link) link.classList.add("active");
+      }
+    });
+  }, { rootMargin: "-10% 0px -80% 0px", threshold: 0 });
+
+  sections.forEach(s => obs.observe(s));
+
+  links.forEach(l => {
+    l.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const el = document.getElementById(l.getAttribute("href").slice(1));
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
+  document.querySelectorAll(".codeblock").forEach(block => {
+    const btn = document.createElement("button");
+    btn.className = "copybtn";
+    btn.type = "button";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", async () => {
+      const pre = block.querySelector("pre");
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        btn.textContent = "Copied";
+        btn.classList.add("done");
+        setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600);
+      } catch {
+        btn.textContent = "Ctrl+C";
+      }
+    });
+    block.appendChild(btn);
+  });
+</script>
+</body>
+</html>

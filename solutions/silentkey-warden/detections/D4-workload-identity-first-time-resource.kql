@@ -1,0 +1,49 @@
+// =====================================================================================
+// D4 - Workload identity accessed a resource for the first time
+// -------------------------------------------------------------------------------------
+// Maps to  : POC Test C - Anomalous Fabric Access by a Workload Identity
+// Table    : AADServicePrincipalSignInLogs  (diagnostic category: ServicePrincipalSignInLogs)
+// Severity : 3 (Informational)
+// -------------------------------------------------------------------------------------
+// What it finds
+//   A service principal requesting a token for a resource it has never successfully
+//   touched in the preceding 14 days. This is a home-grown approximation of what Entra's
+//   anomalousServicePrincipalActivity detection does natively once it has a baseline.
+//
+// Why it matters
+//   POC Test C is the concrete case: an identity provisioned to read Azure SQL suddenly
+//   asks for a Power BI / Fabric token. Nothing is technically wrong - the permission
+//   may even be granted - but the pivot itself is the signal. An attacker exploring what
+//   data a stolen credential can reach looks exactly like this.
+//
+// Important caveats
+//   - This is deliberately severity 3. It is a lead, not a verdict.
+//   - It is NOISY for the first 14 days after deployment because the baseline is empty.
+//     Expect that, and do not tune it down before the window fills.
+//   - New legitimate integrations will fire it. That is working as intended: a workload
+//     identity reaching a new resource should be a known, ticketed event.
+//
+// Triage
+//   1. Is there a change record for a new integration on that identity?
+//   2. Does the new resource fit the identity's stated purpose?
+//   3. Correlate with D3 - a first-time access that is part of a burst is far worse than
+//      a single first-time access.
+// =====================================================================================
+
+let BaselineWindow = 14d;
+let DetectionWindow = 1h;
+let KnownPairs =
+    AADServicePrincipalSignInLogs
+    | where TimeGenerated between (ago(BaselineWindow) .. ago(DetectionWindow))
+    | where ResultType == 0
+    | distinct ServicePrincipalId, ResourceDisplayName;
+AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(DetectionWindow)
+| where ResultType == 0
+| join kind=leftanti KnownPairs on ServicePrincipalId, ResourceDisplayName
+| summarize
+    FirstAccess = min(TimeGenerated),
+    SignIns     = count(),
+    SourceIPs   = make_set(IPAddress, 10)
+    by ServicePrincipalName, ServicePrincipalId, AppId, ResourceDisplayName
+| order by FirstAccess desc

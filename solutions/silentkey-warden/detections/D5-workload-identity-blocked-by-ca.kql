@@ -1,0 +1,45 @@
+// =====================================================================================
+// D5 - Workload identity blocked by Conditional Access (AADSTS53003)
+// -------------------------------------------------------------------------------------
+// Maps to  : POC Test E - CA Enforcement: Full Block Demonstration
+// Table    : AADServicePrincipalSignInLogs  (diagnostic category: ServicePrincipalSignInLogs)
+// Severity : 2 (Warning)
+// -------------------------------------------------------------------------------------
+// What it finds
+//   Token issuance denied to a service principal by a Conditional Access policy.
+//   ResultType 53003 is the definitive "Conditional Access blocked this" code.
+//
+// Why it matters - two different stories, same query
+//   1. CONTAINMENT WORKING. A risky identity tried to get a token and could not. The
+//      block happens at the token issuance layer, so the identity gets nothing for ANY
+//      resource - not Graph, not ARM, not Key Vault, not Fabric.
+//   2. FALSE POSITIVE HURTING PRODUCTION. A legitimate identity got caught by the risk
+//      policy and a real workload is now failing. You need to know within minutes, not
+//      when the application owner opens a ticket tomorrow.
+//
+//   Both need eyes. That is why this alert exists even though a block is "good news".
+//
+// Triage
+//   1. Look up the AppId in D2. Is there a genuine risk detection behind the block?
+//   2. If yes: containment is working. Continue the investigation, leave it blocked.
+//   3. If no, or if the risk was an admin confirmation made in error: dismiss the risk in
+//      Identity Protection to restore access. No secret rotation is required if the
+//      identity was not actually compromised.
+// =====================================================================================
+
+let Lookback = 24h;
+AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(Lookback)
+| where ResultType == 53003
+| extend AppliedPolicies = tostring(ConditionalAccessPolicies)
+| project
+    TimeGenerated,
+    ServicePrincipalName,
+    ServicePrincipalId,
+    AppId,
+    ResourceDisplayName,
+    IPAddress,
+    ResultType,
+    ResultDescription,
+    AppliedPolicies
+| order by TimeGenerated desc

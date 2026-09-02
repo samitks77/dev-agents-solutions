@@ -1,0 +1,27 @@
+{
+  "displayName": "silentkey-warden - Block Risky Workload Identities",
+  "state": "enabledForReportingButNotEnforced",
+  "conditions": {
+    "clientApplications": {
+      "includeServicePrincipals": [
+        "ServicePrincipalsInMyTenant"
+      ],
+      "excludeServicePrincipals": []
+    },
+    "applications": {
+      "includeApplications": [
+        "All"
+      ]
+    },
+    "servicePrincipalRiskLevels": [
+      "high",
+      "medium"
+    ]
+  },
+  "grantControls": {
+    "operator": "OR",
+    "builtInControls": [
+      "block"
+    ]
+  }
+}
