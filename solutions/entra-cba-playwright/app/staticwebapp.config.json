@@ -1,0 +1,28 @@
+{
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; base-uri 'none'; connect-src 'self' https://login.microsoftonline.com; frame-ancestors 'none'; frame-src https://login.microsoftonline.com; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff"
+  },
+  "mimeTypes": {
+    ".cer": "application/pkix-cert",
+    ".crl": "application/pkix-crl"
+  },
+  "routes": [
+    {
+      "route": "/crl/*",
+      "headers": {
+        "Cache-Control": "no-store"
+      }
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/app.js",
+      "/config.js",
+      "/styles.css",
+      "/crl/*"
+    ]
+  }
+}

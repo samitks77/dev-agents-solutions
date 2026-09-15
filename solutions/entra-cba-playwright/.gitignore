@@ -1,0 +1,11 @@
+.auth/
+.artifacts/
+.env
+!.env.example
+.lab-secrets/
+.lab-state/
+.lab-tools/
+dist/
+node_modules/
+playwright-report/
+test-results/
