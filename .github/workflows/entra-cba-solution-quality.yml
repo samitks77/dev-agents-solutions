@@ -1,0 +1,78 @@
+name: entra-cba-solution-quality
+
+on:
+  push:
+    branches:
+      - main
+      - feature/entra-cba-playwright
+    paths:
+      - ".github/workflows/entra-cba-solution-quality.yml"
+      - ".github/workflows/entra-cba-playwright-poc.yml"
+      - "solutions/entra-cba-playwright/**"
+  pull_request:
+    paths:
+      - ".github/workflows/entra-cba-solution-quality.yml"
+      - ".github/workflows/entra-cba-playwright-poc.yml"
+      - "solutions/entra-cba-playwright/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Entra CBA solution
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: solutions/entra-cba-playwright/package-lock.json
+
+      - name: Install pinned dependencies
+        working-directory: solutions/entra-cba-playwright
+        run: npm ci --ignore-scripts
+
+      - name: Type-check Playwright and application code
+        working-directory: solutions/entra-cba-playwright
+        run: npm run typecheck
+
+      - name: Build the relying application
+        working-directory: solutions/entra-cba-playwright
+        run: npm run build:app
+
+      - name: Parse every PowerShell script
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem solutions/entra-cba-playwright/scripts -Filter *.ps1 |
+            ForEach-Object {
+              $errors = $null
+              [void][Management.Automation.Language.Parser]::ParseFile(
+                $_.FullName,
+                [ref]$null,
+                [ref]$errors
+              )
+              foreach ($error in @($errors)) {
+                $failed = $true
+                Write-Host (
+                  "::error file=$($_.FullName)," +
+                  "line=$($error.Extent.StartLineNumber)::$($error.Message)"
+                )
+              }
+            }
+          if ($failed) {
+            throw "One or more PowerShell scripts failed to parse."
+          }
+
+      - name: Compile the Bicep deployment
+        run: >
+          az bicep build
+          --file solutions/entra-cba-playwright/infra/main.bicep
+          --outfile "${RUNNER_TEMP}/entra-cba-main.json"

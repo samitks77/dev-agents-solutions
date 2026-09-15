@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entra CBA Playwright POC</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Microsoft Entra lab</p>
+      <h1>Certificate-based authentication POC</h1>
+      <p>This application exposes only the identity claims needed to verify the Playwright CBA flow.</p>
+
+      <section class="panel" aria-live="polite">
+        <h2>Authentication state</h2>
+        <p id="status" data-testid="auth-status" data-state="initializing">Initializing</p>
+        <button id="sign-in" data-testid="sign-in" type="button" hidden>Sign in with Microsoft Entra</button>
+        <button id="sign-out" data-testid="sign-out" type="button" hidden>Sign out</button>
+      </section>
+
+      <section id="claims" class="panel" data-testid="claims" hidden>
+        <h2>Verified identity</h2>
+        <dl>
+          <dt>Username</dt>
+          <dd data-testid="username"></dd>
+          <dt>Tenant ID</dt>
+          <dd data-testid="tenant-id"></dd>
+          <dt>Object ID</dt>
+          <dd data-testid="object-id"></dd>
+        </dl>
+      </section>
+
+      <section id="error-panel" class="panel error" data-testid="error-panel" hidden>
+        <h2>Authentication error</h2>
+        <pre id="error"></pre>
+      </section>
+    </main>
+    <script src="/config.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
