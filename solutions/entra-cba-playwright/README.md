@@ -285,7 +285,9 @@ authorization time for the propagation wait, negative finalization wait,
 evidence timeout, and a ten-minute operational and restoration reserve. The
 documented values require 57 minutes. If the issued token cannot cover the
 calculated window, the run fails before changing either the lab policy or the
-managed-policy exclusions. Recovery-only mode requires at least ten minutes.
+managed-policy exclusions. Device-token polling retries OAuth pending/slow-down responses,
+prematurely ended responses and transient HTTP 5xx responses only within the server-issued
+authorization window. Recovery-only mode requires at least ten minutes.
 
 The transaction performs these operations in order:
 
