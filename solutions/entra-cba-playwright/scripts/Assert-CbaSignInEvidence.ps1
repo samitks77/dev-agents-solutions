@@ -76,11 +76,13 @@ $expectedCorrelationId = $CorrelationId.ToString()
 if ($CorrelationId -eq [guid]::Empty) {
     throw 'The expected sign-in correlation ID cannot be empty.'
 }
-$records = @($evidence.records | Where-Object {
-    $_.appId -eq $application.appId -and
-    $_.userPrincipalName -eq $entra.testUserUpn -and
+$correlationRecords = @($evidence.records | Where-Object {
     $_.correlationId -eq $expectedCorrelationId -and
     [DateTimeOffset]::Parse($_.createdDateTime) -ge $Since.ToUniversalTime().AddMinutes(-1)
+})
+$records = @($correlationRecords | Where-Object {
+    $_.appId -eq $application.appId -and
+    $_.userPrincipalName -eq $entra.testUserUpn
 })
 if ($records.Count -eq 0) {
     throw 'No recent target-application sign-in record was found for the dedicated test user.'
@@ -92,11 +94,15 @@ foreach ($record in $records) {
     $appliedPolicy = @($record.appliedConditionalAccessPolicies | Where-Object {
         $_.id -eq $conditionalAccess.policyId
     })
-    if ($appliedPolicy.Count -ne 1) {
+    if ($Scenario -eq 'negative' -and $appliedPolicy.Count -ne 1) {
         continue
     }
 
-    $policyResult = [string]$appliedPolicy[0].result
+    $policyResult = if ($appliedPolicy.Count -eq 1) {
+        [string]$appliedPolicy[0].result
+    } else {
+        $null
+    }
     $statusCode = [int64]$record.status.errorCode
     $isolatedPoliciesNotApplied = if ($Scenario -eq 'negative') {
         $allExpectedPoliciesNotApplied = $true
@@ -124,7 +130,25 @@ foreach ($record in $records) {
         $true
     }
     $expectedOutcome = if ($Scenario -eq 'positive') {
-        $statusCode -eq 0 -and $policyResult -eq 'success'
+        $correlatedPolicySuccess = @(
+            $correlationRecords | Where-Object {
+                @(
+                    $_.appliedConditionalAccessPolicies | Where-Object {
+                        $_.id -eq $conditionalAccess.policyId -and
+                        $_.result -eq 'success'
+                    }
+                ).Count -eq 1
+            }
+        ).Count -gt 0
+        $correlatedPolicyFailure = @(
+            $correlationRecords.appliedConditionalAccessPolicies | Where-Object {
+                $_.id -eq $conditionalAccess.policyId -and
+                $_.result -in @('failure', 'reportOnlyFailure')
+            }
+        ).Count -gt 0
+        $statusCode -eq 0 -and
+            $correlatedPolicySuccess -and
+            -not $correlatedPolicyFailure
     } else {
         $statusCode -eq 500187 -and
         $policyResult -eq 'failure' -and
@@ -138,9 +162,6 @@ foreach ($record in $records) {
         continue
     }
 
-    $correlationRecords = @($evidence.records | Where-Object {
-        $_.correlationId -eq $expectedCorrelationId
-    })
     $certificateDetails = @($correlationRecords.authenticationDetails | Where-Object {
         $_.authenticationMethod -match 'certificate'
     })
@@ -188,9 +209,13 @@ if (-not $matchedRecord) {
     )
 }
 
-$matchedPolicy = @($matchedRecord.appliedConditionalAccessPolicies | Where-Object {
-    $_.id -eq $conditionalAccess.policyId
-})[0]
+$matchedPolicyResult = if ($Scenario -eq 'positive') {
+    'success'
+} else {
+    @($matchedRecord.appliedConditionalAccessPolicies | Where-Object {
+        $_.id -eq $conditionalAccess.policyId
+    })[0].result
+}
 $receipt = [ordered]@{
     applicationId = $application.appId
     authenticationMethod = 'Certificate-based authentication'
@@ -203,7 +228,7 @@ $receipt = [ordered]@{
     isolatedManagedPolicyIds = @($isolatedPolicyIds)
     policyDisplayName = $conditionalAccess.policyDisplayName
     policyId = $conditionalAccess.policyId
-    policyResult = $matchedPolicy.result
+    policyResult = $matchedPolicyResult
     proofSetId = $ProofSetId
     scenario = $Scenario
     signInCreatedDateTime = $matchedRecord.createdDateTime

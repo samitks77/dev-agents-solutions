@@ -319,11 +319,16 @@ If execution is interrupted, run recovery before another proof:
 
 The positive gate requires all of the following on the exact correlation ID:
 
-- terminal error code `0`;
-- exact lab policy result `success`;
+- at least one terminal application record with error code `0`;
+- an exact lab-policy result `success` within the same correlation;
 - certificate authentication level `multiFactorAuthentication`;
 - successful X.509 authentication step;
 - modern PKI store (`Is Legacy Store Used = 0`).
+
+Entra can emit the terminal application success and the successful policy/CBA step as companion
+records under one correlation—for example, when a `50140` keep-me-signed-in interrupt accompanies
+the final `0` record. The assertion requires both correlated facts and rejects the proof if any
+record in that correlation reports the lab policy as `failure` or `reportOnlyFailure`.
 
 The negative gate requires:
 
