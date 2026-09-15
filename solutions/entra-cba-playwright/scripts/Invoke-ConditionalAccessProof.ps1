@@ -70,6 +70,11 @@ function Connect-ValidatedGraphDeviceCode {
                 $intervalSeconds += 5
                 continue
             }
+            if ($_.FullyQualifiedErrorId -match 'ResponseEnded' -or
+                $_.Exception.Message -match 'response ended prematurely') {
+                Write-Warning 'Device-token polling response ended early; retrying within the authorization window.'
+                continue
+            }
             if ($details) {
                 throw (
                     "Device authorization failed: $($details.error): " +
