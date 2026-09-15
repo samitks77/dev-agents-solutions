@@ -167,10 +167,12 @@ if ($ExpectedRunId -eq 0) {
 if ([string]::IsNullOrWhiteSpace($ExpectedHeadSha)) {
     $ExpectedHeadSha = [string]$identity.githubSha
 }
-if ($ExpectedPositiveCorrelationId -eq [guid]::Empty) {
+if (-not $PSBoundParameters.ContainsKey('ExpectedPositiveCorrelationId') -or
+    $ExpectedPositiveCorrelationId -eq [guid]::Empty) {
     $ExpectedPositiveCorrelationId = [guid]$positive.correlationId
 }
-if ($ExpectedNegativeCorrelationId -eq [guid]::Empty) {
+if (-not $PSBoundParameters.ContainsKey('ExpectedNegativeCorrelationId') -or
+    $ExpectedNegativeCorrelationId -eq [guid]::Empty) {
     $ExpectedNegativeCorrelationId = [guid]$negative.correlationId
 }
 
