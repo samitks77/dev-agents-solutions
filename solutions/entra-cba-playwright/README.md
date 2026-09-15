@@ -42,7 +42,7 @@ flowchart LR
     ACI --> ART
 ```
 
-The runner is created just in time by `Start-EphemeralGitHubRunner.ps1` in the ACI-delegated subnet. It downloads a SHA-256-pinned GitHub runner, registers with a verification-specific label, executes one job in a Playwright image pinned by OCI SHA-256 digest, and is then deleted and deregistered.
+The runner is created just in time by `Start-EphemeralGitHubRunner.ps1` in the ACI-delegated subnet. It downloads a SHA-256-pinned GitHub runner, registers with a verification-specific label, executes one job in a Playwright image pinned by OCI SHA-256 digest, and is then deleted and deregistered. The launcher allows a bounded 15-minute registration window because regional ACI provisioning can exceed 10 minutes; the job then has its own separate bounded lifetime.
 
 `Runner-Network.ps1` validates the live ARM topology before launch:
 

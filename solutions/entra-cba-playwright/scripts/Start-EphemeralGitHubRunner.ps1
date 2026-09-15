@@ -7,6 +7,7 @@ param(
     [string]$WorkflowFile = 'entra-cba-playwright-poc.yml',
     [string]$Ref,
     [switch]$Dispatch,
+    [ValidateRange(10, 30)][int]$RegistrationTimeoutMinutes = 15,
     [ValidateRange(5, 60)][int]$TimeoutMinutes = 30
 )
 
@@ -350,7 +351,9 @@ $containerBody = @{
     tags = @{
         component = 'github-runner'
         environment = 'poc'
-        expiresAtUtc = [DateTimeOffset]::UtcNow.AddMinutes($TimeoutMinutes + 10).ToString('o')
+        expiresAtUtc = [DateTimeOffset]::UtcNow.AddMinutes(
+            $RegistrationTimeoutMinutes + $TimeoutMinutes + 10
+        ).ToString('o')
         launcherId = $verificationId
         managedBy = 'script'
         workload = 'entra-cba-playwright'
@@ -396,7 +399,7 @@ try {
     }
     $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runnerStatePath -Encoding utf8NoBOM
 
-    $registrationDeadline = (Get-Date).AddMinutes(10)
+    $registrationDeadline = (Get-Date).AddMinutes($RegistrationTimeoutMinutes)
     $registeredRunner = $null
     do {
         Start-Sleep -Seconds 10
@@ -412,11 +415,16 @@ try {
             --name $containerName `
             --resource-group $infrastructure.resourceGroup `
             --output json | ConvertFrom-Json
-        $logs = (az container logs `
-            --name $containerName `
-            --resource-group $infrastructure.resourceGroup) -join [Environment]::NewLine
+        try {
+            $logs = (az container logs `
+                --name $containerName `
+                --resource-group $infrastructure.resourceGroup) -join [Environment]::NewLine
+        } catch {
+            $logs = "Unavailable: $($_.Exception.Message)"
+        }
         throw (
-            "Runner did not register within ten minutes. Container provisioning state: " +
+            "Runner did not register within $RegistrationTimeoutMinutes minutes. " +
+            'Container provisioning state: ' +
             "'$($container.provisioningState)'. Logs: $logs"
         )
     }
