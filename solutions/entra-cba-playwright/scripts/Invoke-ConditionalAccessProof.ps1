@@ -75,6 +75,19 @@ function Connect-ValidatedGraphDeviceCode {
                 Write-Warning 'Device-token polling response ended early; retrying within the authorization window.'
                 continue
             }
+            $statusCode = if ($_.Exception.Response -and
+                $null -ne $_.Exception.Response.StatusCode) {
+                [int]$_.Exception.Response.StatusCode
+            } else {
+                $null
+            }
+            if ($null -ne $statusCode -and $statusCode -ge 500 -and $statusCode -lt 600) {
+                Write-Warning (
+                    "Device-token polling returned transient HTTP $statusCode; " +
+                    'retrying within the authorization window.'
+                )
+                continue
+            }
             if ($details) {
                 throw (
                     "Device authorization failed: $($details.error): " +
