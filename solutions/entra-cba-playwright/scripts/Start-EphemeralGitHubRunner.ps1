@@ -57,7 +57,7 @@ if ($application.tenantId -ne $infrastructure.tenantId -or
     throw 'Application, Entra, and infrastructure state do not describe the same lab identity.'
 }
 if (-not $Ref) {
-    $Ref = (& git branch --show-current).Trim()
+    $Ref = (& git -C $labRoot branch --show-current).Trim()
 }
 if (-not $Ref -or @($github.allowedBranches) -cnotcontains $Ref) {
     throw "Ref '$Ref' is not in the exact GitHub environment branch allowlist."
@@ -220,7 +220,7 @@ foreach ($existingContainer in $existingContainers) {
     Remove-AciContainerGroup -Name $existingContainer.name
 }
 
-$localHeadSha = (& git rev-parse HEAD).Trim()
+$localHeadSha = (& git -C $labRoot rev-parse HEAD).Trim()
 $encodedRef = [Uri]::EscapeDataString($Ref)
 $remoteHeadSha = gh api `
     "repos/$Repository/commits/$encodedRef" `
