@@ -27,7 +27,7 @@ if ($application.tenantId -ne $TenantId -or $entra.tenantId -ne $TenantId) {
 
 Import-Module Microsoft.Graph.Authentication -RequiredVersion 2.39.0 -Force
 
-$requiredScopes = @('AuditLog.Read.All', 'Policy.Read.All')
+$requiredScopes = @('AuditLog.Read.All')
 $context = Get-MgContext
 $missingScopes = @($requiredScopes | Where-Object { $_ -notin @($context.Scopes) })
 $hasRequiredContext = $context -and $context.TenantId -eq $TenantId -and $missingScopes.Count -eq 0
