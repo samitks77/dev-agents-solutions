@@ -12,6 +12,8 @@ const required = (name) => {
   return value;
 };
 
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+
 const fetchJson = async (url, options, operation) => {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -99,8 +101,11 @@ const runnerPrivateAddresses = [
       .map(({ address }) => address),
   ),
 ].sort();
-if (!runnerPrivateAddresses.some((address) => isAddressInCidr(address, expectedRunnerSubnetCidr))) {
-  throw new Error(`Runner has no private address in '${expectedRunnerSubnetCidr}'.`);
+const runnerPrivateAddressesInExpectedSubnet = runnerPrivateAddresses.filter(
+  (address) => isAddressInCidr(address, expectedRunnerSubnetCidr),
+);
+if (runnerPrivateAddressesInExpectedSubnet.length !== 1) {
+  throw new Error(`Runner does not have exactly one private address in '${expectedRunnerSubnetCidr}'.`);
 }
 
 const oidcUrl = new URL(idTokenRequestUrl);
@@ -218,16 +223,17 @@ const receiptDirectory = path.resolve(process.cwd(), '.artifacts', 'receipts');
 await mkdir(receiptDirectory, { mode: 0o700, recursive: true });
 const networkReceipt = {
   azure: {
-    keyVaultHost: vaultHost,
+    keyVaultHostSha256: sha256(vaultHost),
     keyVaultRead: 'succeeded',
-    privateEndpointIp: expectedPrivateEndpointIp,
-    resolvedVaultIpv4Addresses: resolvedVaultAddresses,
-    runnerSubnetCidr: expectedRunnerSubnetCidr,
+    privateEndpointIpSha256: sha256(expectedPrivateEndpointIp),
+    resolvedVaultIpv4AddressCount: resolvedVaultAddresses.length,
+    resolvedVaultIpv4AddressSha256: sha256(resolvedVaultAddresses[0]),
+    runnerSubnetCidrSha256: sha256(expectedRunnerSubnetCidr),
   },
   github: {
     oidcAudience: 'api://AzureADTokenExchange',
     oidcIssuer: oidcClaims.iss,
-    oidcSubject: oidcClaims.sub,
+    oidcSubjectSha256: sha256(oidcClaims.sub),
     repository: githubRepository,
     runId: githubRunId,
     sha: githubSha,
@@ -235,13 +241,17 @@ const networkReceipt = {
   runner: {
     architecture: runnerArch,
     environment: oidcClaims.runner_environment,
-    label: runnerLabel,
-    name: runnerName,
+    labelSha256: sha256(runnerLabel),
+    nameSha256: sha256(runnerName),
     os: runnerOs,
-    privateIpv4Addresses: runnerPrivateAddresses,
+    privateIpv4AddressCount: runnerPrivateAddresses.length,
+    privateIpv4InExpectedSubnetCount: runnerPrivateAddressesInExpectedSubnet.length,
+    privateIpv4InExpectedSubnetSha256: sha256(
+      JSON.stringify(runnerPrivateAddressesInExpectedSubnet),
+    ),
   },
-  schemaVersion: 1,
-  verificationId,
+  schemaVersion: 2,
+  verificationIdSha256: sha256(verificationId),
   verifiedAt: new Date().toISOString(),
 };
 const receiptSha256 = createHash('sha256')

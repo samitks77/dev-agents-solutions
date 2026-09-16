@@ -18,6 +18,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $stateDirectory = Join-Path $labRoot '.lab-state'
 . (Join-Path $PSScriptRoot 'Proof-Set.ps1')
 . (Join-Path $PSScriptRoot 'Runner-Network.ps1')
+. (Join-Path $PSScriptRoot 'Workflow-Privacy.ps1')
 $paths = [ordered]@{
     application = Join-Path $stateDirectory 'application.json'
     conditionalAccess = Join-Path $stateDirectory 'conditional-access.json'
@@ -268,6 +269,34 @@ foreach ($stepName in $requiredStepNames) {
         -Evidence "status=$($step[0].status); conclusion=$($step[0].conclusion)"
 }
 
+$workflowLogProtectedValues = Get-WorkflowLogProtectedValues `
+    -Application $application `
+    -Entra $entra `
+    -GitHub $github `
+    -Infrastructure $infrastructure `
+    -RunnerNetwork $runner.network
+$workflowLogPrivacy = Test-WorkflowLogPrivacy `
+    -Repository $runner.repository `
+    -RunId $ExpectedRunId `
+    -ProtectedValues $workflowLogProtectedValues
+Add-ProofCheck `
+    -Stage 'Public log privacy' `
+    -Name 'GitHub job log contains no exact or encoded lab deployment values' `
+    -Condition (
+        $runner.workflowLogPrivacyVerified -eq $true -and
+        $runner.workflowLogSha256 -ceq $workflowLogPrivacy.logSha256 -and
+        [int]$runner.workflowLogProtectedValueCount -eq
+            [int]$workflowLogPrivacy.protectedValueCount -and
+        [int]$runner.workflowLogVariantCount -eq
+            [int]$workflowLogPrivacy.variantCount
+    ) `
+    -Source 'Live GitHub log replay against ignored local state' `
+    -Evidence (
+        "protectedValues=$($workflowLogPrivacy.protectedValueCount); " +
+        "variants=$($workflowLogPrivacy.variantCount); " +
+        "logSha256=$($workflowLogPrivacy.logSha256)"
+    )
+
 $identityHash = (
     Get-FileHash -LiteralPath $identityPath -Algorithm SHA256
 ).Hash.ToLowerInvariant()
@@ -290,10 +319,13 @@ Add-ProofCheck `
     -Stage 'Playwright identity' `
     -Name 'Exact identity commitment, run, and SHA were verified' `
     -Condition (
-        [int]$identity.schemaVersion -eq 2 -and
+        [int]$identity.schemaVersion -eq 3 -and
         [long]$identity.githubRunId -eq $ExpectedRunId -and
         $identity.githubSha -eq $ExpectedHeadSha -and
-        $identity.identitySha256 -ceq $expectedIdentitySha256
+        $identity.identitySha256 -ceq $expectedIdentitySha256 -and
+        $identity.verificationIdSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.verificationId)
+        )
     ) `
     -Source 'Re-hashed Playwright receipt' `
     -Evidence "identitySha256=$($identity.identitySha256)"
@@ -363,16 +395,26 @@ Add-ProofCheck `
     -Stage 'Private credential path' `
     -Name 'Runner resolved and read Key Vault only at the private IP' `
     -Condition (
+        [int]$network.schemaVersion -eq 2 -and
         $network.azure.keyVaultRead -eq 'succeeded' -and
-        $network.azure.privateEndpointIp -eq $runner.network.privateEndpointIp -and
-        (Test-ExactStringSet `
-            -Actual @($network.azure.resolvedVaultIpv4Addresses) `
-            -Expected @($runner.network.privateEndpointIp))
+        $network.azure.keyVaultHostSha256 -ceq (
+            Get-TextSha256 -Text "$($runner.network.keyVaultName).vault.azure.net"
+        ) -and
+        $network.azure.privateEndpointIpSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.network.privateEndpointIp)
+        ) -and
+        $network.azure.runnerSubnetCidrSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.network.runnerSubnetCidr)
+        ) -and
+        [int]$network.azure.resolvedVaultIpv4AddressCount -eq 1 -and
+        $network.azure.resolvedVaultIpv4AddressSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.network.privateEndpointIp)
+        )
     ) `
     -Source 'Re-hashed runner receipt' `
     -Evidence (
         "vaultRead=$($network.azure.keyVaultRead); " +
-        "resolved=$(@($network.azure.resolvedVaultIpv4Addresses) -join ',')"
+        "endpointSha256=$($network.azure.privateEndpointIpSha256)"
     )
 Add-ProofCheck `
     -Stage 'GitHub workload identity' `
@@ -380,33 +422,44 @@ Add-ProofCheck `
     -Condition (
         $network.github.oidcIssuer -eq 'https://token.actions.githubusercontent.com' -and
         $network.github.oidcAudience -eq 'api://AzureADTokenExchange' -and
-        $network.github.oidcSubject -eq $github.subject -and
+        $network.github.oidcSubjectSha256 -ceq (
+            Get-TextSha256 -Text ([string]$github.subject)
+        ) -and
         $network.github.repository -eq $runner.repository -and
         [long]$network.github.runId -eq $ExpectedRunId -and
-        $network.github.sha -eq $ExpectedHeadSha
+        $network.github.sha -eq $ExpectedHeadSha -and
+        $network.verificationIdSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.verificationId)
+        )
     ) `
     -Source 'Re-hashed runner receipt' `
     -Evidence (
         "issuer=$($network.github.oidcIssuer); " +
-        "subject=$($network.github.oidcSubject)"
+        "subjectSha256=$($network.github.oidcSubjectSha256)"
     )
 Add-ProofCheck `
     -Stage 'Ephemeral runner identity' `
     -Name 'ACI runner name, label, subnet, and operating system are exact' `
     -Condition (
         $network.runner.environment -eq 'self-hosted' -and
-        $network.runner.name -eq $runner.runnerName -and
-        $network.runner.label -eq $runner.label -and
+        $network.runner.nameSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.runnerName)
+        ) -and
+        $network.runner.labelSha256 -ceq (
+            Get-TextSha256 -Text ([string]$runner.label)
+        ) -and
         $network.runner.os -eq 'Linux' -and
-        @($network.runner.privateIpv4Addresses).Count -eq 1 -and
-        (Test-Ipv4AddressInCidr `
-            -Address ([string]$network.runner.privateIpv4Addresses[0]) `
-            -Cidr ([string]$runner.network.runnerSubnetCidr))
+        $network.runner.architecture -eq 'X64' -and
+        [int]$network.runner.privateIpv4AddressCount -ge 1 -and
+        [int]$network.runner.privateIpv4InExpectedSubnetCount -eq 1 -and
+        $network.runner.privateIpv4InExpectedSubnetSha256 -ceq
+            $runner.runnerPrivateIpv4InExpectedSubnetSha256
     ) `
     -Source 'Re-hashed runner receipt' `
     -Evidence (
-        "name=$($network.runner.name); label=$($network.runner.label); " +
-        "privateIp=$($network.runner.privateIpv4Addresses[0])"
+        "nameSha256=$($network.runner.nameSha256); " +
+        "labelSha256=$($network.runner.labelSha256); " +
+        "privateIpv4Commitment=$($network.runner.privateIpv4InExpectedSubnetSha256)"
     )
 
 $subscriptionId = [string]$infrastructure.subscriptionId
@@ -608,6 +661,22 @@ $matchingRunners = @(
         @($_.labels.name) -contains $runner.label
     }
 )
+$artifactResponse = Invoke-NativeJson -FilePath 'gh' -ArgumentList @(
+    'api',
+    "repos/$($runner.repository)/actions/runs/$ExpectedRunId/artifacts"
+)
+$matchingArtifacts = @($artifactResponse.artifacts | Where-Object {
+    $_.name -like 'entra-cba-playwright-*'
+})
+Add-ProofCheck `
+    -Stage 'Public artifact privacy' `
+    -Name 'Transient GitHub evidence artifact was deleted after verified download' `
+    -Condition (
+        $runner.evidenceArtifactDeleted -eq $true -and
+        $matchingArtifacts.Count -eq 0
+    ) `
+    -Source 'Live GitHub API' `
+    -Evidence "matchingArtifacts=$($matchingArtifacts.Count); localReceiptsRetained=true"
 Add-ProofCheck `
     -Stage 'Live cleanup' `
     -Name 'Ephemeral ACI container no longer exists' `

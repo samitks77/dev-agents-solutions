@@ -18,15 +18,18 @@ test('authenticates the expected Entra user using CBA', async ({ page }, testInf
     username: lab.testUsername,
   };
   const receiptDirectory = path.resolve(process.cwd(), '.artifacts', 'receipts');
+  const verificationId = process.env.CBA_VERIFICATION_ID;
   await mkdir(receiptDirectory, { recursive: true });
   await writeFile(
     path.join(receiptDirectory, 'cba-feasibility.json'),
     `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       githubRunId: process.env.GITHUB_RUN_ID ?? null,
       githubSha: process.env.GITHUB_SHA ?? null,
       identitySha256: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
-      verificationId: process.env.CBA_VERIFICATION_ID ?? null,
+      verificationIdSha256: verificationId
+        ? createHash('sha256').update(verificationId).digest('hex')
+        : null,
       verifiedAt: new Date().toISOString(),
     }, null, 2)}\n`,
     { encoding: 'utf8', mode: 0o600 },

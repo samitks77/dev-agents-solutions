@@ -93,6 +93,65 @@ foreach ($relativePath in $candidateFiles) {
     }
 }
 
+$workflowRelativePath = '.github/workflows/entra-cba-playwright-poc.yml'
+$workflowPath = Join-Path $repositoryRoot $workflowRelativePath
+$workflow = Get-Content -LiteralPath $workflowPath -Raw
+if ($workflow -match '\$\{\{\s*vars\.') {
+    $failures.Add(
+        "$workflowRelativePath must not inject deployment identifiers from GitHub variables."
+    )
+}
+if ($workflow -match '(?m)^\s*run-name:\s*.*\$\{\{') {
+    $failures.Add("$workflowRelativePath must use a non-identifying constant run name.")
+}
+$requiredSecretMappings = [ordered]@{
+    AZURE_CLIENT_ID = 'AZURE_CLIENT_ID'
+    AZURE_TENANT_ID = 'AZURE_TENANT_ID'
+    CBA_APP_HOSTNAME_MASK = 'CBA_APP_HOSTNAME_MASK'
+    CBA_APP_URL = 'CBA_APP_URL'
+    CBA_EXPECTED_OIDC_SUBJECT = 'CBA_EXPECTED_OIDC_SUBJECT'
+    CBA_EXPECTED_PRIVATE_ENDPOINT_IP = 'KEY_VAULT_PRIVATE_ENDPOINT_IP'
+    CBA_EXPECTED_RUNNER_SUBNET_CIDR = 'RUNNER_SUBNET_CIDR'
+    CBA_TENANT_ID = 'AZURE_TENANT_ID'
+    CBA_TEST_OBJECT_ID = 'CBA_TEST_OBJECT_ID'
+    CBA_TEST_USERNAME = 'CBA_TEST_USERNAME'
+    KEY_VAULT_NAME = 'KEY_VAULT_NAME'
+}
+foreach ($mapping in $requiredSecretMappings.GetEnumerator()) {
+    $mappingPattern = (
+        '(?m)^\s*' +
+        [regex]::Escape($mapping.Key) +
+        ':\s*\$\{\{\s*secrets\.' +
+        [regex]::Escape($mapping.Value) +
+        '\s*\}\}\s*$'
+    )
+    if ($workflow -notmatch $mappingPattern) {
+        $failures.Add(
+            "$workflowRelativePath must map '$($mapping.Key)' from encrypted secret " +
+            "'$($mapping.Value)'."
+        )
+    }
+}
+
+$oidcConfigurationRelativePath = (
+    "$solutionPrefix/scripts/Configure-GitHubOidc.ps1"
+)
+$oidcConfigurationPath = Join-Path $repositoryRoot $oidcConfigurationRelativePath
+$oidcConfiguration = Get-Content -LiteralPath $oidcConfigurationPath -Raw
+if ($oidcConfiguration -notmatch '\bgh secret set\b') {
+    $failures.Add("$oidcConfigurationRelativePath must configure encrypted environment secrets.")
+}
+if ($oidcConfiguration -match '\bgh variable set\b') {
+    $failures.Add(
+        "$oidcConfigurationRelativePath must not store deployment identifiers as environment variables."
+    )
+}
+if ($oidcConfiguration -notmatch '\bgh variable delete\b') {
+    $failures.Add(
+        "$oidcConfigurationRelativePath must remove legacy environment variables after migration."
+    )
+}
+
 $examplePath = Join-Path $labRoot '.env.example'
 $example = Get-Content -LiteralPath $examplePath -Raw
 $requiredPlaceholders = @(
