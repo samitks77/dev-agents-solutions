@@ -55,7 +55,7 @@ foreach ($scenario in $Scenarios) {
     $pendingScenarios[$scenario] = $pending
 }
 
-$requiredScopes = @('AuditLog.Read.All', 'Policy.Read.All')
+$requiredScopes = @('AuditLog.Read.All')
 Import-Module Microsoft.Graph.Authentication -RequiredVersion 2.39.0 -Force
 $context = Get-MgContext
 $missingScopes = @($requiredScopes | Where-Object { $_ -notin @($context.Scopes) })
