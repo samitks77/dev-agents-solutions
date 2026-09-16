@@ -14,7 +14,7 @@ on:
 
 permissions: {}
 
-run-name: Entra CBA POC ${{ inputs.verification_id || github.run_id }}
+run-name: Entra CBA privacy-verified proof
 
 concurrency:
   cancel-in-progress: true
@@ -30,22 +30,22 @@ jobs:
     runs-on: ${{ inputs.runner_label || format('entra-cba-poc-run-{0}', github.run_id) }}
     timeout-minutes: 20
     env:
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      CBA_APP_URL: ${{ vars.CBA_APP_URL }}
-      CBA_CERTAUTH_ORIGIN: ${{ vars.CBA_CERTAUTH_ORIGIN }}
-      CBA_EXPECTED_OIDC_SUBJECT: ${{ vars.CBA_EXPECTED_OIDC_SUBJECT }}
-      CBA_EXPECTED_PRIVATE_ENDPOINT_IP: ${{ vars.KEY_VAULT_PRIVATE_ENDPOINT_IP }}
-      CBA_EXPECTED_RUNNER_SUBNET_CIDR: ${{ vars.RUNNER_SUBNET_CIDR }}
-      CBA_PFX_PASSPHRASE_SECRET_NAME: ${{ vars.CBA_PFX_PASSPHRASE_SECRET_NAME }}
-      CBA_PFX_SECRET_NAME: ${{ vars.CBA_PFX_SECRET_NAME }}
-      CBA_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      CBA_TEST_OBJECT_ID: ${{ vars.CBA_TEST_OBJECT_ID }}
-      CBA_TEST_USERNAME: ${{ vars.CBA_TEST_USERNAME }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      CBA_APP_HOSTNAME_MASK: ${{ secrets.CBA_APP_HOSTNAME_MASK }}
+      CBA_APP_URL: ${{ secrets.CBA_APP_URL }}
+      CBA_CERTAUTH_ORIGIN: https://certauth.login.microsoftonline.com
+      CBA_EXPECTED_OIDC_SUBJECT: ${{ secrets.CBA_EXPECTED_OIDC_SUBJECT }}
+      CBA_EXPECTED_PRIVATE_ENDPOINT_IP: ${{ secrets.KEY_VAULT_PRIVATE_ENDPOINT_IP }}
+      CBA_EXPECTED_RUNNER_SUBNET_CIDR: ${{ secrets.RUNNER_SUBNET_CIDR }}
+      CBA_PFX_PASSPHRASE_SECRET_NAME: cba-test-user-pfx-passphrase
+      CBA_PFX_SECRET_NAME: cba-test-user-pfx
+      CBA_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      CBA_TEST_OBJECT_ID: ${{ secrets.CBA_TEST_OBJECT_ID }}
+      CBA_TEST_USERNAME: ${{ secrets.CBA_TEST_USERNAME }}
       CBA_VERIFICATION_ID: ${{ inputs.verification_id || github.run_id }}
       CBA_RUNNER_LABEL: ${{ inputs.runner_label || format('entra-cba-poc-run-{0}', github.run_id) }}
-      KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
+      KEY_VAULT_NAME: ${{ secrets.KEY_VAULT_NAME }}
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       RUN_NEGATIVE_CBA_TESTS: "false"
 
@@ -54,6 +54,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sensitive_names=(
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            CBA_APP_HOSTNAME_MASK
+            CBA_APP_URL
+            CBA_EXPECTED_OIDC_SUBJECT
+            CBA_EXPECTED_PRIVATE_ENDPOINT_IP
+            CBA_EXPECTED_RUNNER_SUBNET_CIDR
+            CBA_TEST_OBJECT_ID
+            CBA_TEST_USERNAME
+            KEY_VAULT_NAME
+          )
+          for name in "${sensitive_names[@]}"; do
+            value="${!name:-}"
+            if [[ -z "$value" ]]; then
+              echo "::error::Required protected workflow value '$name' is not set."
+              exit 1
+            fi
+            uri_encoded="$(VALUE="$value" node -p 'encodeURIComponent(process.env.VALUE)')"
+            base64_encoded="$(printf '%s' "$value" | base64 | tr -d '\n')"
+            printf '::add-mask::%s\n' "$value" "$uri_encoded" "$base64_encoded"
+          done
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
               if [[ ! "$CBA_VERIFICATION_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
@@ -128,6 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           receipt_directory="solutions/entra-cba-playwright/.artifacts/receipts"
+          node solutions/entra-cba-playwright/scripts/Test-CiReceiptPrivacy.mjs "$receipt_directory"
           expected_receipts=("cba-feasibility.json" "runner-network.json")
           mapfile -t actual_entries < <(
             find "$receipt_directory" -mindepth 1 -printf '%P\n' | LC_ALL=C sort
@@ -156,7 +179,7 @@ jobs:
           include-hidden-files: true
           name: entra-cba-playwright-${{ github.run_id }}
           path: solutions/entra-cba-playwright/.artifacts/receipts
-          retention-days: 7
+          retention-days: 1
 
       - name: Remove runtime credentials
         if: always()

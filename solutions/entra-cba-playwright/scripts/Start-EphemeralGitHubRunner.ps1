@@ -25,6 +25,7 @@ $runnerStatePath = Join-Path $stateDirectory 'runner.json'
 $ciEvidenceRoot = Join-Path $labRoot '.artifacts\ci'
 . (Join-Path $PSScriptRoot 'Runner-Network.ps1')
 . (Join-Path $PSScriptRoot 'Proof-Set.ps1')
+. (Join-Path $PSScriptRoot 'Workflow-Privacy.ps1')
 
 foreach ($requiredPath in @(
     $applicationStatePath,
@@ -78,6 +79,12 @@ if (-not $github.network -or
     $github.network.runnerOutboundIp -ne $runnerNetwork.runnerOutboundIp) {
     throw 'GitHub state does not match the current Azure runner network. Rerun Configure-GitHubOidc.ps1.'
 }
+$workflowLogProtectedValues = Get-WorkflowLogProtectedValues `
+    -Application $application `
+    -Entra $entra `
+    -GitHub $github `
+    -Infrastructure $infrastructure `
+    -RunnerNetwork $runnerNetwork
 
 $repo = gh repo view $Repository --json nameWithOwner,viewerPermission,url | ConvertFrom-Json
 if ($repo.nameWithOwner -cne $Repository -or $repo.viewerPermission -ne 'ADMIN') {
@@ -223,7 +230,7 @@ if ($Dispatch) {
     $runnerLabel = "entra-cba-poc-run-$verificationId"
     $expectedWorkflowEvent = 'push'
 }
-$expectedRunTitle = "Entra CBA POC $verificationId"
+$expectedRunTitle = 'Entra CBA privacy-verified proof'
 $runnerNameSuffix = if ($verificationId.Length -gt 16) {
     $verificationId.Substring(0, 8)
 } else {
@@ -339,6 +346,9 @@ $containerUri = (
     "/containerGroups/$containerName`?api-version=2023-05-01"
 )
 
+$evidenceArtifactId = $null
+$expectedArtifactName = $null
+$workflowLogPrivacy = $null
 try {
     Invoke-RestMethod `
         -Method Put `
@@ -407,6 +417,20 @@ try {
         $runnerContainerGroup.tags.component -ne 'github-runner') {
         throw 'The provisioned ACI runner does not match the exact image, subnet, lifecycle, and launch ID.'
     }
+    $runnerPrivateIpv4 = [string]$runnerContainerGroup.ipAddress.ip
+    if ($runnerPrivateIpv4 -notmatch '^(?:\d{1,3}\.){3}\d{1,3}$' -or
+        -not (Test-Ipv4AddressInCidr `
+            -Address $runnerPrivateIpv4 `
+            -Cidr $runnerNetwork.runnerSubnetCidr)) {
+        throw 'The live ACI runner does not have one expected private address in the delegated subnet.'
+    }
+    $runnerPrivateIpv4InExpectedSubnetSha256 = Get-TextSha256 -Text (
+        ConvertTo-Json -InputObject @($runnerPrivateIpv4) -Compress
+    )
+    $workflowLogProtectedValues['ACI runner private IP'] = $runnerPrivateIpv4
+    $state.runnerPrivateIpv4InExpectedSubnetSha256 = (
+        $runnerPrivateIpv4InExpectedSubnetSha256
+    )
 
     Write-Host "RUNNER_READY name=$runnerName label=$runnerLabel"
 
@@ -429,6 +453,10 @@ try {
             $workflowRuns = @((gh api $runsUri | ConvertFrom-Json).workflow_runs)
             $matchingRuns = @($workflowRuns | Where-Object {
                 $_.display_title -ceq $expectedRunTitle -and
+                $_.event -eq 'workflow_dispatch' -and
+                $_.head_branch -ceq $Ref -and
+                $_.head_sha -eq $localHeadSha -and
+                $_.path -ceq ".github/workflows/$WorkflowFile" -and
                 [DateTimeOffset]::Parse($_.created_at) -ge $dispatchStartedAt.AddMinutes(-1)
             })
             if ($matchingRuns.Count -gt 1) {
@@ -482,6 +510,10 @@ try {
     if ($workflowRun.conclusion -ne 'success' -or $jobs[0].conclusion -ne 'success') {
         throw "Workflow run '$($workflowRun.id)' concluded '$($workflowRun.conclusion)'."
     }
+    $workflowLogPrivacy = Test-WorkflowLogPrivacy `
+        -Repository $Repository `
+        -RunId ([long]$workflowRun.id) `
+        -ProtectedValues $workflowLogProtectedValues
 
     $ciEvidenceDirectory = Join-Path $ciEvidenceRoot ([string]$workflowRun.id)
     if (Test-Path -LiteralPath $ciEvidenceDirectory) {
@@ -543,7 +575,7 @@ try {
             'githubSha',
             'identitySha256',
             'schemaVersion',
-            'verificationId',
+            'verificationIdSha256',
             'verifiedAt'
         ) `
         -Label 'Identity receipt'
@@ -555,27 +587,44 @@ try {
             'receiptSha256',
             'runner',
             'schemaVersion',
-            'verificationId',
+            'verificationIdSha256',
             'verifiedAt'
         ) `
         -Label 'Runner network receipt'
     Assert-ExactProperties `
         -Object $networkReceipt.azure `
         -Expected @(
-            'keyVaultHost',
+            'keyVaultHostSha256',
             'keyVaultRead',
-            'privateEndpointIp',
-            'resolvedVaultIpv4Addresses',
-            'runnerSubnetCidr'
+            'privateEndpointIpSha256',
+            'resolvedVaultIpv4AddressCount',
+            'resolvedVaultIpv4AddressSha256',
+            'runnerSubnetCidrSha256'
         ) `
         -Label 'Runner network Azure evidence'
     Assert-ExactProperties `
         -Object $networkReceipt.github `
-        -Expected @('oidcAudience', 'oidcIssuer', 'oidcSubject', 'repository', 'runId', 'sha') `
+        -Expected @(
+            'oidcAudience',
+            'oidcIssuer',
+            'oidcSubjectSha256',
+            'repository',
+            'runId',
+            'sha'
+        ) `
         -Label 'Runner network GitHub evidence'
     Assert-ExactProperties `
         -Object $networkReceipt.runner `
-        -Expected @('architecture', 'environment', 'label', 'name', 'os', 'privateIpv4Addresses') `
+        -Expected @(
+            'architecture',
+            'environment',
+            'labelSha256',
+            'nameSha256',
+            'os',
+            'privateIpv4AddressCount',
+            'privateIpv4InExpectedSubnetCount',
+            'privateIpv4InExpectedSubnetSha256'
+        ) `
         -Label 'Runner network runtime evidence'
 
     $expectedIdentityJson = [ordered]@{
@@ -589,40 +638,53 @@ try {
             [Text.Encoding]::UTF8.GetBytes($expectedIdentityJson)
         )
     ).ToLowerInvariant()
-    if ([int]$identityReceipt.schemaVersion -ne 2 -or
-        $identityReceipt.verificationId -ne $verificationId -or
+    $verificationIdSha256 = Get-TextSha256 -Text $verificationId
+    if ([int]$identityReceipt.schemaVersion -ne 3 -or
+        $identityReceipt.verificationIdSha256 -cne $verificationIdSha256 -or
         [string]$identityReceipt.githubRunId -ne [string]$workflowRun.id -or
         $identityReceipt.githubSha -ne $workflowRun.head_sha -or
         $identityReceipt.identitySha256 -cne $expectedIdentitySha256) {
         throw 'The identity receipt does not match the exact workflow revision and lab identity.'
     }
-    if ([int]$networkReceipt.schemaVersion -ne 1 -or
-        $networkReceipt.verificationId -ne $verificationId -or
+    if ([int]$networkReceipt.schemaVersion -ne 2 -or
+        $networkReceipt.verificationIdSha256 -cne $verificationIdSha256 -or
         $networkReceipt.receiptSha256 -notmatch '^[0-9a-f]{64}$' -or
-        $networkReceipt.azure.keyVaultHost -cne "$($runnerNetwork.keyVaultName).vault.azure.net" -or
+        $networkReceipt.azure.keyVaultHostSha256 -cne (
+            Get-TextSha256 -Text "$($runnerNetwork.keyVaultName).vault.azure.net"
+        ) -or
         $networkReceipt.azure.keyVaultRead -ne 'succeeded' -or
-        $networkReceipt.azure.privateEndpointIp -ne $runnerNetwork.privateEndpointIp -or
-        $networkReceipt.azure.runnerSubnetCidr -ne $runnerNetwork.runnerSubnetCidr -or
-        @($networkReceipt.azure.resolvedVaultIpv4Addresses).Count -ne 1 -or
-        $networkReceipt.azure.resolvedVaultIpv4Addresses[0] -ne $runnerNetwork.privateEndpointIp -or
+        $networkReceipt.azure.privateEndpointIpSha256 -cne (
+            Get-TextSha256 -Text $runnerNetwork.privateEndpointIp
+        ) -or
+        $networkReceipt.azure.runnerSubnetCidrSha256 -cne (
+            Get-TextSha256 -Text $runnerNetwork.runnerSubnetCidr
+        ) -or
+        [int]$networkReceipt.azure.resolvedVaultIpv4AddressCount -ne 1 -or
+        $networkReceipt.azure.resolvedVaultIpv4AddressSha256 -cne (
+            Get-TextSha256 -Text $runnerNetwork.privateEndpointIp
+        ) -or
         $networkReceipt.github.oidcAudience -ne 'api://AzureADTokenExchange' -or
         $networkReceipt.github.oidcIssuer -ne 'https://token.actions.githubusercontent.com' -or
-        $networkReceipt.github.oidcSubject -cne $github.subject -or
+        $networkReceipt.github.oidcSubjectSha256 -cne (
+            Get-TextSha256 -Text $github.subject
+        ) -or
         $networkReceipt.github.repository -cne $Repository -or
         [string]$networkReceipt.github.runId -ne [string]$workflowRun.id -or
         $networkReceipt.github.sha -ne $workflowRun.head_sha -or
         $networkReceipt.runner.environment -ne 'self-hosted' -or
-        $networkReceipt.runner.label -cne $runnerLabel -or
-        $networkReceipt.runner.name -cne $runnerName -or
+        $networkReceipt.runner.labelSha256 -cne (
+            Get-TextSha256 -Text $runnerLabel
+        ) -or
+        $networkReceipt.runner.nameSha256 -cne (
+            Get-TextSha256 -Text $runnerName
+        ) -or
         $networkReceipt.runner.os -ne 'Linux' -or
-        $networkReceipt.runner.architecture -ne 'X64') {
+        $networkReceipt.runner.architecture -ne 'X64' -or
+        [int]$networkReceipt.runner.privateIpv4AddressCount -lt 1 -or
+        [int]$networkReceipt.runner.privateIpv4InExpectedSubnetCount -ne 1 -or
+        $networkReceipt.runner.privateIpv4InExpectedSubnetSha256 -cne
+            $runnerPrivateIpv4InExpectedSubnetSha256) {
         throw 'The runner network receipt does not match the exact ACI, OIDC, and Private Endpoint path.'
-    }
-    $runnerAddressesInSubnet = @($networkReceipt.runner.privateIpv4Addresses | Where-Object {
-        Test-Ipv4AddressInCidr -Address $_ -Cidr $runnerNetwork.runnerSubnetCidr
-    })
-    if ($runnerAddressesInSubnet.Count -eq 0) {
-        throw 'The CI receipt does not prove an ACI address in the delegated runner subnet.'
     }
 
     $proofSetId = Get-E2eProofSetId `
@@ -642,6 +704,11 @@ try {
         Get-FileHash -LiteralPath $networkReceiptPath -Algorithm SHA256
     ).Hash.ToLowerInvariant()
     $state.proofSetId = $proofSetId
+    $state.workflowLogPrivacyVerified = $true
+    $state.workflowLogPrivacyVerifiedAt = $workflowLogPrivacy.verifiedAt
+    $state.workflowLogProtectedValueCount = $workflowLogPrivacy.protectedValueCount
+    $state.workflowLogSha256 = $workflowLogPrivacy.logSha256
+    $state.workflowLogVariantCount = $workflowLogPrivacy.variantCount
     $state.workflowConclusion = $workflowRun.conclusion
     $state.workflowEvent = $workflowRun.event
     $state.workflowHeadSha = $workflowRun.head_sha
@@ -663,6 +730,10 @@ try {
             )
             $candidateMatches = @($candidateRuns | Where-Object {
                 $_.display_title -ceq $expectedRunTitle -and
+                $_.event -eq 'workflow_dispatch' -and
+                $_.head_branch -ceq $Ref -and
+                $_.head_sha -eq $localHeadSha -and
+                $_.path -ceq ".github/workflows/$WorkflowFile" -and
                 [DateTimeOffset]::Parse($_.created_at) -ge $dispatchStartedAt.AddMinutes(-1)
             })
             if ($candidateMatches.Count -eq 1) {
@@ -701,6 +772,64 @@ try {
         }
     } catch {
         $cleanupErrors.Add("Workflow cancellation failed: $($_.Exception.Message)")
+    }
+    try {
+        if ($cleanupWorkflowRun -and $cleanupWorkflowRun.id) {
+            $artifactResponse = gh api `
+                "repos/$Repository/actions/runs/$($cleanupWorkflowRun.id)/artifacts" |
+                ConvertFrom-Json
+            $solutionArtifacts = @($artifactResponse.artifacts | Where-Object {
+                $_.name -like 'entra-cba-playwright-*'
+            })
+            foreach ($artifact in $solutionArtifacts) {
+                gh api `
+                    --method DELETE `
+                    "repos/$Repository/actions/artifacts/$($artifact.id)" `
+                    --silent
+            }
+
+            $artifactDeletionDeadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+            do {
+                $remainingArtifactResponse = gh api `
+                    "repos/$Repository/actions/runs/$($cleanupWorkflowRun.id)/artifacts" |
+                    ConvertFrom-Json
+                $remainingSolutionArtifacts = @(
+                    $remainingArtifactResponse.artifacts | Where-Object {
+                        $_.name -like 'entra-cba-playwright-*'
+                    }
+                )
+                if ($remainingSolutionArtifacts.Count -eq 0) {
+                    break
+                }
+                Start-Sleep -Seconds 3
+            } while ([DateTimeOffset]::UtcNow -lt $artifactDeletionDeadline)
+            if ($remainingSolutionArtifacts.Count -ne 0) {
+                throw 'The transient GitHub evidence artifact still exists after deletion.'
+            }
+        }
+    } catch {
+        $cleanupErrors.Add("Evidence artifact deletion failed: $($_.Exception.Message)")
+    }
+    try {
+        if ($cleanupWorkflowRun -and
+            $cleanupWorkflowRun.id -and
+            -not $workflowLogPrivacy) {
+            gh api `
+                --method DELETE `
+                "repos/$Repository/actions/runs/$($cleanupWorkflowRun.id)" `
+                --silent
+            $recentRunIds = @(
+                gh api `
+                    --paginate `
+                    "repos/$Repository/actions/runs?per_page=100" `
+                    --jq '.workflow_runs[].id'
+            )
+            if ($recentRunIds -contains [string]$cleanupWorkflowRun.id) {
+                throw 'The workflow run with an unverified public log still exists after deletion.'
+            }
+        }
+    } catch {
+        $cleanupErrors.Add("Unverified workflow run deletion failed: $($_.Exception.Message)")
     }
     try {
         Remove-AciContainerGroup -Name $containerName
@@ -743,6 +872,7 @@ try {
     if ($state) {
         $state.aciContainerDeleted = $true
         $state.cleanupVerifiedAt = (Get-Date).ToString('o')
+        $state.evidenceArtifactDeleted = $true
         $state.githubRunnerDeregistered = $true
         $state.workflowFinalConclusion = $cleanupWorkflowRun.conclusion
         $state.workflowFinalStatus = $cleanupWorkflowRun.status
@@ -751,7 +881,5 @@ try {
 }
 
 Write-Host (
-    "END_TO_END_VERIFIED runId=$($workflowRun.id) runner=$runnerName " +
-    "privateEndpointIp=$($runnerNetwork.privateEndpointIp) receiptTransport=$evidenceTransport " +
-    'conclusion=success cleanup=verified'
+    'END_TO_END_VERIFIED conclusion=success privacy=verified cleanup=verified'
 )

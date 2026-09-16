@@ -17,7 +17,7 @@ screenshots or rerunning tenant mutations.
 
 Download the
 [full end-to-end test results and manual operator runbook](docs/entra-cba-playwright-e2e-test-results-and-runbook.pdf).
-The 28-page report explains why and how each of the 35 proof checks was performed, records the
+The report explains why and how each of the 37 proof checks was performed, records the
 observed result and evidence source for every check, and provides:
 
 - a safe public-proof verification path with no tenant mutation;
@@ -66,7 +66,7 @@ flowchart LR
     KV[Key Vault<br/>public access disabled]
     ENTRA[Microsoft Entra<br/>OIDC exchange + CBA]
     APP[Azure Static Web App<br/>exact identity claims]
-    ART[Sanitized GitHub evidence<br/>mandatory private artifact]
+    ART[Privacy-safe commitments<br/>transient bounded artifact]
 
     GH -->|unique runner label| ACI
     ACI --- RS
@@ -103,13 +103,15 @@ The GitHub configuration script requires GitHub's immutable owner-ID/repository-
 It resolves the repository through the GitHub API and refuses federation unless the numeric owner
 and repository identities match the exact default subject prefix returned by GitHub.
 
-The launcher retrieves the receipts from one size-bounded GitHub artifact. Public job-log receipt
-fallback is deliberately disabled because Base64 is not confidentiality. The identity receipt
-contains only a SHA-256 commitment to the exact UPN, tenant, object ID and application URL; the
-launcher recomputes that commitment from ignored local state. It rejects the evidence unless the
-network receipt, identity commitment, workflow run, Git commit, ACI runner name/label, Azure
-topology and exact Entra identity all match. It records receipt hashes only after ACI deletion and
-GitHub runner deregistration are verified.
+The launcher retrieves two privacy-safe receipts from one size-bounded transient GitHub artifact.
+Public job-log receipt fallback is deliberately disabled because Base64 is not confidentiality.
+The receipts contain SHA-256 commitments and pass/fail assertions instead of raw user, tenant,
+subscription, application, vault, network, OIDC subject, runner, or verification identifiers. The
+launcher recomputes every commitment it can from ignored local state, rejects cross-run or
+cross-identity evidence, and deletes the remote artifact after verified download. It also downloads
+the completed public job log and fails if any exact, URL-encoded, or Base64-encoded lab value is
+present. Receipt and log hashes are recorded only after ACI deletion, artifact deletion, and GitHub
+runner deregistration are verified.
 
 ### Why there is no Private Link Service
 
@@ -128,7 +130,8 @@ This is a fail-closed verification workflow, not a demo that treats a browser re
 5. **Azure network:** the runner uses the delegated ACI subnet and NAT IP, while the vault name resolves only to its Private Endpoint IP.
 6. **Workload identity:** the GitHub OIDC issuer, audience, subject, repository, run ID, and commit SHA are exact before Entra exchanges the token.
 7. **GitHub execution:** the expected workflow, job, ephemeral runner, unique label, revision, and conclusion all match.
-8. **Cleanup:** the ACI container is deleted, the GitHub runner is deregistered, the lab CA policy is report-only, and any temporary application exclusions are restored exactly.
+8. **Public-output privacy:** the job log contains no protected lab value, receipts disclose only commitments, and the transient artifact is deleted after verified download.
+9. **Cleanup:** the ACI container is deleted, the GitHub runner is deregistered, the lab CA policy is report-only, and any temporary application exclusions are restored exactly.
 
 The test fails if evidence is absent, stale, ambiguous, broader than expected, or from a different identity, application, policy, run, runner, or commit.
 
@@ -270,9 +273,10 @@ and Conditional Access receipt binds to the same tested repository revision.
 The publisher receives secret-write access only during publication and runs an Azure CLI image
 pinned by its MCR manifest SHA-256 digest. The script verifies the deployed ACI image before
 accepting publication. The PFX and passphrase are separate Key Vault secrets. The GitHub workload
-identity receives secret-read access but no secret mutation role. GitHub receives nonsecret IDs,
-names, addresses and expected claims as environment variables; no GitHub secret contains the
-certificate.
+identity receives secret-read access but no secret mutation role. Deployment identifiers are stored
+as encrypted GitHub environment secrets so GitHub masks their exact values in public logs; legacy
+environment variables are removed after migration. No GitHub secret contains the certificate or
+its passphrase.
 
 ### Phase 7: run Playwright on the ephemeral Azure runner
 
@@ -294,12 +298,17 @@ The launcher:
 5. exchanges the GitHub OIDC token only after exact claim validation;
 6. resolves and reads Key Vault only through the Private Endpoint;
 7. runs Playwright with the retrieved certificate;
-8. validates the sanitized identity and network receipts;
-9. cancels an unfinished workflow on failure;
-10. deletes the ACI group and verifies GitHub runner deregistration in `finally`.
+8. validates the commitment-only identity and network receipts;
+9. scans the completed job log against every exact and encoded local deployment value;
+10. deletes the transient GitHub artifact after verified download;
+11. deletes any workflow run whose public log cannot be verified;
+12. cancels an unfinished workflow on failure;
+13. deletes the ACI group and verifies GitHub runner deregistration in `finally`.
 
 Artifact upload is mandatory. If artifact storage is unavailable or exhausted, the workflow and
-launcher fail closed rather than print identity or network receipts into a public job log.
+launcher fail closed rather than print receipts into a public job log. The artifact contains no raw
+lab identifier and is deleted after the launcher verifies and saves its two local ignored copies.
+A failed or unavailable log-privacy replay causes the entire workflow run and its logs to be deleted.
 
 Bind the final local controls to the cloud-tested revision:
 

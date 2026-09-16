@@ -157,28 +157,69 @@ foreach ($branch in $allowedBranchSet) {
     }
 }
 
-$environmentVariables = [ordered]@{
+$environmentSecrets = [ordered]@{
     AZURE_CLIENT_ID = $infrastructure.outputs.workloadClientId.value
-    AZURE_SUBSCRIPTION_ID = $infrastructure.subscriptionId
     AZURE_TENANT_ID = $infrastructure.tenantId
+    CBA_APP_HOSTNAME_MASK = ([Uri]$application.appUrl).DnsSafeHost
     CBA_APP_URL = $application.appUrl
-    CBA_CERTAUTH_ORIGIN = 'https://certauth.login.microsoftonline.com'
     CBA_EXPECTED_OIDC_SUBJECT = $subject
-    CBA_PFX_PASSPHRASE_SECRET_NAME = 'cba-test-user-pfx-passphrase'
-    CBA_PFX_SECRET_NAME = 'cba-test-user-pfx'
     CBA_TEST_OBJECT_ID = $entra.testUserId
     CBA_TEST_USERNAME = $entra.testUserUpn
     KEY_VAULT_NAME = $infrastructure.outputs.runnerVaultName.value
     KEY_VAULT_PRIVATE_ENDPOINT_IP = $runnerNetwork.privateEndpointIp
-    RUNNER_OUTBOUND_IP = $runnerNetwork.runnerOutboundIp
     RUNNER_SUBNET_CIDR = $runnerNetwork.runnerSubnetCidr
 }
-foreach ($entry in $environmentVariables.GetEnumerator()) {
-    gh variable set `
+foreach ($entry in $environmentSecrets.GetEnumerator()) {
+    gh secret set `
         $entry.Key `
         --repo $Repository `
         --env $Environment `
         --body ([string]$entry.Value)
+}
+$verifiedSecretNames = @(
+    gh api `
+        --paginate `
+        "$environmentUri/secrets?per_page=100" `
+        --jq '.secrets[].name'
+)
+foreach ($secretName in $environmentSecrets.Keys) {
+    if ($verifiedSecretNames -cnotcontains $secretName) {
+        throw "GitHub environment secret '$secretName' was not verified after creation."
+    }
+}
+
+$legacyEnvironmentVariableNames = @(
+    'AZURE_CLIENT_ID',
+    'AZURE_SUBSCRIPTION_ID',
+    'AZURE_TENANT_ID',
+    'CBA_APP_HOSTNAME_MASK',
+    'CBA_APP_URL',
+    'CBA_CERTAUTH_ORIGIN',
+    'CBA_EXPECTED_OIDC_SUBJECT',
+    'CBA_PFX_PASSPHRASE_SECRET_NAME',
+    'CBA_PFX_SECRET_NAME',
+    'CBA_TEST_OBJECT_ID',
+    'CBA_TEST_USERNAME',
+    'KEY_VAULT_NAME',
+    'KEY_VAULT_PRIVATE_ENDPOINT_IP',
+    'RUNNER_OUTBOUND_IP',
+    'RUNNER_SUBNET_CIDR'
+)
+$existingEnvironmentVariableNames = @(
+    gh variable list `
+        --repo $Repository `
+        --env $Environment `
+        --json name |
+        ConvertFrom-Json |
+        ForEach-Object { $_.name }
+)
+foreach ($variableName in $legacyEnvironmentVariableNames) {
+    if ($existingEnvironmentVariableNames -ccontains $variableName) {
+        gh variable delete `
+            $variableName `
+            --repo $Repository `
+            --env $Environment
+    }
 }
 
 $verifiedCredential = az identity federated-credential show `
@@ -216,6 +257,7 @@ if ($verifiedEnvironment.deployment_branch_policy.protected_branches -or
 $githubState = [ordered]@{
     allowedBranches = @($allowedBranchSet)
     environment = $Environment
+    environmentSecretNames = @($environmentSecrets.Keys)
     federatedCredentialName = $FederatedCredentialName
     issuer = $issuer
     immutableSubject = [bool]$oidcCustomization.use_immutable_subject
@@ -229,5 +271,7 @@ $githubState = [ordered]@{
 $githubState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $githubStatePath -Encoding utf8NoBOM
 
 Write-Host "GitHub environment '$Environment' is restricted to: $($AllowedBranches -join ', ')"
-Write-Host "Azure federated subject: $subject"
-Write-Host 'No GitHub secret was created.'
+Write-Host (
+    "Configured $($environmentSecrets.Count) encrypted GitHub environment secrets. " +
+    'The certificate and passphrase remain only in Key Vault.'
+)
