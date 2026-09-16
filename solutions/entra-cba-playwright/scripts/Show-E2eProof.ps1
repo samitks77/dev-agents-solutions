@@ -275,6 +275,17 @@ $workflowLogProtectedValues = Get-WorkflowLogProtectedValues `
     -GitHub $github `
     -Infrastructure $infrastructure `
     -RunnerNetwork $runner.network
+$runnerPrivateIpv4 = [string]$runner.runnerPrivateIpv4
+if ($runnerPrivateIpv4 -notmatch '^(?:\d{1,3}\.){3}\d{1,3}$' -or
+    -not (Test-Ipv4AddressInCidr `
+        -Address $runnerPrivateIpv4 `
+        -Cidr ([string]$runner.network.runnerSubnetCidr)) -or
+    (Get-TextSha256 -Text (
+        ConvertTo-Json -InputObject @($runnerPrivateIpv4) -Compress
+    )) -cne $runner.runnerPrivateIpv4InExpectedSubnetSha256) {
+    throw 'Ignored runner state does not preserve the exact verified transient ACI address.'
+}
+$workflowLogProtectedValues['ACI runner private IP'] = $runnerPrivateIpv4
 $workflowLogPrivacy = Test-WorkflowLogPrivacy `
     -Repository $runner.repository `
     -RunId $ExpectedRunId `

@@ -428,6 +428,7 @@ try {
         ConvertTo-Json -InputObject @($runnerPrivateIpv4) -Compress
     )
     $workflowLogProtectedValues['ACI runner private IP'] = $runnerPrivateIpv4
+    $state.runnerPrivateIpv4 = $runnerPrivateIpv4
     $state.runnerPrivateIpv4InExpectedSubnetSha256 = (
         $runnerPrivateIpv4InExpectedSubnetSha256
     )
