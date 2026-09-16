@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public Azure built-in Key Vault role definition IDs"
+regexTarget = "secret"
+regexes = [
+  '''(?i)^4633458b-17de-408a-b874-0445c86b69e6$''',
+  '''(?i)^b86a8fe4-44ce-4948-aee5-eccb2c155cd7$''',
+]

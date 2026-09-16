@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/entra-cba-playwright
     paths:
       - ".github/workflows/entra-cba-solution-quality.yml"
       - ".github/workflows/entra-cba-playwright-poc.yml"
@@ -70,6 +69,10 @@ jobs:
           if ($failed) {
             throw "One or more PowerShell scripts failed to parse."
           }
+
+      - name: Reject deployment-specific values and sensitive files
+        shell: pwsh
+        run: ./solutions/entra-cba-playwright/scripts/Test-PublicTemplate.ps1
 
       - name: Compile the Bicep deployment
         run: >

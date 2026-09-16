@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Repository = 'samitks77/dev-agents-solutions',
+    [Parameter(Mandatory)][string]$Repository,
     [string]$Environment = 'entra-cba-poc',
     [string[]]$AllowedBranches = @('main'),
     [string]$FederatedCredentialName = 'github-entra-cba-poc'

@@ -10,6 +10,15 @@ param tags object = {
   managedBy: 'bicep'
 }
 
+@description('Non-overlapping RFC1918 address prefix for the lab virtual network.')
+param virtualNetworkAddressPrefix string
+
+@description('Non-overlapping RFC1918 address prefix delegated to Azure Container Instances.')
+param runnerSubnetAddressPrefix string
+
+@description('Non-overlapping RFC1918 address prefix used by private endpoints.')
+param privateEndpointSubnetAddressPrefix string
+
 var suffix = uniqueString(subscription().subscriptionId, resourceGroup().id)
 var logAnalyticsName = 'log-entra-cba-pw-${suffix}'
 var keyVaultPrivateEndpointName = 'pep-${runnerVaultName}'
@@ -24,6 +33,7 @@ var staticWebAppName = 'stapp-entra-cba-pw-${suffix}'
 var virtualNetworkName = 'vnet-entra-cba-pw-${suffix}'
 var workloadIdentityName = 'id-entra-cba-github-poc'
 
+// Public Azure built-in Key Vault Secrets User role definition ID.
 var keyVaultSecretsUserRoleId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   '4633458b-17de-408a-b874-0445c86b69e6'
@@ -94,7 +104,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        '10.42.0.0/16'
+        virtualNetworkAddressPrefix
       ]
     }
   }
@@ -104,7 +114,7 @@ resource runnerSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: virtualNetwork
   name: runnerSubnetName
   properties: {
-    addressPrefix: '10.42.1.0/24'
+    addressPrefix: runnerSubnetAddressPrefix
     delegations: [
       {
         name: 'container-instances'
@@ -123,7 +133,7 @@ resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-1
   parent: virtualNetwork
   name: privateEndpointSubnetName
   properties: {
-    addressPrefix: '10.42.2.0/24'
+    addressPrefix: privateEndpointSubnetAddressPrefix
     privateEndpointNetworkPolicies: 'Disabled'
   }
 }

@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$TestUserUpn,
-    [string]$PolicyOid = '1.3.6.1.4.1.55555.1.1',
+    [Parameter(Mandatory)]
+    [ValidatePattern('^\d+(?:\.\d+)+$')]
+    [string]$PolicyOid,
     [string]$CrlUrl,
     [int]$CaValidityDays = 90,
     [int]$UserCertificateValidityDays = 30,

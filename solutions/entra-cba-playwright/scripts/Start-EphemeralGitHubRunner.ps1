@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Repository = 'samitks77/dev-agents-solutions',
+    [Parameter(Mandatory)][string]$Repository,
+    # Public immutable image and archive integrity pins, not deployment credentials.
     [string]$RunnerImage = 'mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e',
     [string]$RunnerVersion = '2.337.0',
     [string]$RunnerSha256 = '70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613',
@@ -145,42 +146,6 @@ function Assert-ExactProperties {
         (Compare-Object $expectedNames $actual -CaseSensitive)) {
         throw "$Label contains unexpected or missing properties."
     }
-}
-
-function Test-Ipv4AddressInCidr {
-    param(
-        [Parameter(Mandatory)][string]$Address,
-        [Parameter(Mandatory)][string]$Cidr
-    )
-
-    $cidrParts = $Cidr.Split('/')
-    if ($cidrParts.Count -ne 2) {
-        throw "CIDR '$Cidr' is invalid."
-    }
-    $prefixLength = [int]$cidrParts[1]
-    if ($prefixLength -lt 0 -or $prefixLength -gt 32) {
-        throw "CIDR '$Cidr' has an invalid prefix."
-    }
-    $addressBytes = [Net.IPAddress]::Parse($Address).GetAddressBytes()
-    $networkBytes = [Net.IPAddress]::Parse($cidrParts[0]).GetAddressBytes()
-    if ($addressBytes.Count -ne 4 -or $networkBytes.Count -ne 4) {
-        return $false
-    }
-    $wholeBytes = [Math]::Floor($prefixLength / 8)
-    for ($index = 0; $index -lt $wholeBytes; $index++) {
-        if ($addressBytes[$index] -ne $networkBytes[$index]) {
-            return $false
-        }
-    }
-    $remainingBits = $prefixLength % 8
-    if ($remainingBits -eq 0) {
-        return $true
-    }
-    $mask = 256 - [Math]::Pow(2, 8 - $remainingBits)
-    return (
-        ($addressBytes[$wholeBytes] -band [int]$mask) -eq
-        ($networkBytes[$wholeBytes] -band [int]$mask)
-    )
 }
 
 $existingRunners = @(Get-RepositoryRunners)

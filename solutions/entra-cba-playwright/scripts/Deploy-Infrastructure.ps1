@@ -2,8 +2,11 @@
 param(
     [Parameter(Mandatory)][string]$Subscription,
     [Parameter(Mandatory)][string]$ExpectedTenantId,
-    [string]$ResourceGroup = 'rg-entra-cba-playwright-poc-eus2',
-    [string]$Location = 'eastus2',
+    [Parameter(Mandatory)][string]$ResourceGroup,
+    [Parameter(Mandatory)][string]$Location,
+    [Parameter(Mandatory)][string]$VirtualNetworkAddressPrefix,
+    [Parameter(Mandatory)][string]$RunnerSubnetAddressPrefix,
+    [Parameter(Mandatory)][string]$PrivateEndpointSubnetAddressPrefix,
     [switch]$WhatIf
 )
 
@@ -14,6 +17,7 @@ $labRoot = Split-Path -Parent $PSScriptRoot
 $stateDirectory = Join-Path $labRoot '.lab-state'
 $templateFile = Join-Path $labRoot 'infra\main.bicep'
 . (Join-Path $PSScriptRoot 'KeyVault-Rbac.ps1')
+. (Join-Path $PSScriptRoot 'Runner-Network.ps1')
 
 function Assert-LabVaultRbac {
     param(
@@ -31,6 +35,7 @@ function Assert-LabVaultRbac {
         --resource-group $ResourceGroup `
         --output json | ConvertFrom-Json
 
+    # Public Azure built-in Key Vault Secrets Officer role definition ID.
     $secretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
     $directOfficerAssignments = @(
         az role assignment list `
@@ -69,6 +74,7 @@ function Assert-LabVaultRbac {
         throw "The GitHub workload identity can mutate Key Vault secrets through $($roleSummary -join ', ')."
     }
 
+    # Public Azure built-in Key Vault Secrets User role definition ID.
     $secretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
     $readerAssignments = @(
         az role assignment list `
@@ -88,6 +94,11 @@ function Assert-LabVaultRbac {
     }
 }
 
+Assert-LabNetworkPrefixes `
+    -VirtualNetworkAddressPrefix $VirtualNetworkAddressPrefix `
+    -RunnerSubnetAddressPrefix $RunnerSubnetAddressPrefix `
+    -PrivateEndpointSubnetAddressPrefix $PrivateEndpointSubnetAddressPrefix
+
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI is required.'
 }
@@ -103,10 +114,11 @@ if ($groupExists -ne 'true') {
     if ($WhatIf) {
         throw "Resource group '$ResourceGroup' does not exist; refusing to create it during a what-if operation."
     }
+    $expiresOn = [DateTime]::UtcNow.AddDays(7).ToString('yyyy-MM-dd')
     az group create `
         --name $ResourceGroup `
         --location $Location `
-        --tags environment=poc workload=entra-cba-playwright managedBy=bicep expiresOn=2026-09-30 `
+        --tags environment=poc workload=entra-cba-playwright managedBy=bicep "expiresOn=$expiresOn" `
         --output none
 }
 
@@ -118,7 +130,11 @@ if ($WhatIf) {
         --name $deploymentName `
         --resource-group $ResourceGroup `
         --template-file $templateFile `
-        --parameters location=$Location
+        --parameters `
+            location=$Location `
+            virtualNetworkAddressPrefix=$VirtualNetworkAddressPrefix `
+            runnerSubnetAddressPrefix=$RunnerSubnetAddressPrefix `
+            privateEndpointSubnetAddressPrefix=$PrivateEndpointSubnetAddressPrefix
     if ($LASTEXITCODE -ne 0) {
         throw "Infrastructure what-if failed with exit code $LASTEXITCODE."
     }
@@ -135,7 +151,11 @@ az deployment group create `
     --name $deploymentName `
     --resource-group $ResourceGroup `
     --template-file $templateFile `
-    --parameters location=$Location `
+    --parameters `
+        location=$Location `
+        virtualNetworkAddressPrefix=$VirtualNetworkAddressPrefix `
+        runnerSubnetAddressPrefix=$RunnerSubnetAddressPrefix `
+        privateEndpointSubnetAddressPrefix=$PrivateEndpointSubnetAddressPrefix `
     --output none
 
 $outputs = az deployment group show `

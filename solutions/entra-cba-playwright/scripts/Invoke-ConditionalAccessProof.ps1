@@ -19,6 +19,7 @@ $requiredScopes = @(
     'Policy.Read.All',
     'Policy.ReadWrite.ConditionalAccess'
 )
+# Public Microsoft Graph PowerShell first-party application ID.
 $graphPowerShellClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 $scope = ($requiredScopes + @('offline_access', 'openid', 'profile')) -join ' '
 
@@ -127,6 +128,7 @@ function Connect-ValidatedGraphDeviceCode {
     $missingScopes = @(
         $requiredScopes | Where-Object { $_ -notin $grantedScopes }
     )
+    # Public Microsoft Graph resource application ID and documented URI audiences.
     $validAudiences = @(
         '00000003-0000-0000-c000-000000000000',
         'https://graph.microsoft.com',
@@ -276,6 +278,7 @@ function Get-LabPolicyRecoveryState {
     return $policyState
 }
 
+# Public Microsoft-managed Conditional Access policy template identity.
 $expectedInterferingPolicyName = 'Multifactor authentication for Microsoft partners and vendors'
 $expectedInterferingTemplateId = '4200930c-0da2-4e33-ca02-000000000004'
 
