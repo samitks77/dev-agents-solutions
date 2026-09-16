@@ -3,6 +3,7 @@ param(
     [string]$PfxSecretName = 'cba-test-user-pfx',
     [string]$PassphraseSecretName = 'cba-test-user-pfx-passphrase',
     [string]$PublisherContainerName = 'aci-cba-secret-publisher',
+    # Public immutable OCI digest, not a deployment credential.
     [string]$PublisherImage = 'mcr.microsoft.com/azure-cli@sha256:2d18d025d51e28e790855a8666fab5b7672f2aa62210bca3a75c1f3fd9b68e25'
 )
 
@@ -125,6 +126,7 @@ foreach ($requiredValue in @($runnerSubnetId, $publisherClientId, $publisherPrin
     }
 }
 
+# Public Azure built-in Key Vault Secrets Officer role definition ID.
 $secretsOfficerRoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 $publisherMutationAssignments = @(Get-KeyVaultSecretMutationAssignments `
     -PrincipalId $publisherPrincipalId `

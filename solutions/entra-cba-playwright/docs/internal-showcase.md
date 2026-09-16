@@ -115,8 +115,15 @@ receipt remain the proof.
 Use only after the workflow exists in the target repository and GitHub OIDC has been configured:
 
 ```powershell
-.\scripts\Configure-GitHubOidc.ps1
-.\scripts\Start-EphemeralGitHubRunner.ps1 -Dispatch -Ref main
+$repository = '<github-owner>/<repository-name>' # Repository containing the solution on main.
+
+.\scripts\Configure-GitHubOidc.ps1 `
+  -Repository $repository `
+  -AllowedBranches @('main')
+.\scripts\Start-EphemeralGitHubRunner.ps1 `
+  -Repository $repository `
+  -Dispatch `
+  -Ref main
 $runnerProof = Get-Content .\.lab-state\runner.json -Raw | ConvertFrom-Json
 $proofSetId = $runnerProof.proofSetId
 

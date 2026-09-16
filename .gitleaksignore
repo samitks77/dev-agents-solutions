@@ -1,3 +1,0 @@
-# Public Azure built-in role definition IDs in Deploy-Infrastructure.ps1.
-0a0ce30cc058ef38bd4b7d9eae78317b63bc607b:solutions/entra-cba-playwright/scripts/Deploy-Infrastructure.ps1:generic-api-key:34
-0a0ce30cc058ef38bd4b7d9eae78317b63bc607b:solutions/entra-cba-playwright/scripts/Deploy-Infrastructure.ps1:generic-api-key:72

@@ -1,3 +1,128 @@
+function ConvertTo-Ipv4Number {
+    param([Parameter(Mandatory)][string]$Address)
+
+    $parsedAddress = $null
+    if (-not [Net.IPAddress]::TryParse($Address, [ref]$parsedAddress) -or
+        $parsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+        $parsedAddress.ToString() -cne $Address) {
+        throw "IPv4 address '$Address' is invalid or non-canonical."
+    }
+
+    $bytes = $parsedAddress.GetAddressBytes()
+    return (
+        ([uint64]$bytes[0] -shl 24) -bor
+        ([uint64]$bytes[1] -shl 16) -bor
+        ([uint64]$bytes[2] -shl 8) -bor
+        [uint64]$bytes[3]
+    )
+}
+
+function Get-Ipv4CidrRange {
+    param([Parameter(Mandatory)][string]$Cidr)
+
+    $cidrParts = $Cidr.Split('/')
+    $prefixLength = 0
+    if ($cidrParts.Count -ne 2 -or
+        -not [int]::TryParse($cidrParts[1], [ref]$prefixLength) -or
+        $prefixLength.ToString() -cne $cidrParts[1] -or
+        $prefixLength -lt 0 -or
+        $prefixLength -gt 32) {
+        throw "CIDR '$Cidr' is invalid."
+    }
+
+    $addressNumber = ConvertTo-Ipv4Number -Address $cidrParts[0]
+    $hostBits = 32 - $prefixLength
+    $hostMask = if ($hostBits -eq 32) {
+        [uint64]4294967295
+    } else {
+        ([uint64]1 -shl $hostBits) - 1
+    }
+    $networkMask = [uint64]4294967295 -bxor $hostMask
+    $networkNumber = $addressNumber -band $networkMask
+    if ($addressNumber -ne $networkNumber) {
+        throw "CIDR '$Cidr' must start at its canonical network address."
+    }
+
+    return [pscustomobject]@{
+        Cidr = $Cidr
+        Network = $networkNumber
+        LastAddress = $networkNumber + $hostMask
+        PrefixLength = $prefixLength
+    }
+}
+
+function Get-Rfc1918Block {
+    param([Parameter(Mandatory)][uint64]$AddressNumber)
+
+    $firstOctet = [int](($AddressNumber -shr 24) -band 255)
+    $secondOctet = [int](($AddressNumber -shr 16) -band 255)
+    if ($firstOctet -eq 10) {
+        return 'class-a-private'
+    }
+    if ($firstOctet -eq 172 -and $secondOctet -ge 16 -and $secondOctet -le 31) {
+        return 'class-b-private'
+    }
+    if ($firstOctet -eq 192 -and $secondOctet -eq 168) {
+        return 'class-c-private'
+    }
+    return $null
+}
+
+function Assert-LabNetworkPrefixes {
+    param(
+        [Parameter(Mandatory)][string]$VirtualNetworkAddressPrefix,
+        [Parameter(Mandatory)][string]$RunnerSubnetAddressPrefix,
+        [Parameter(Mandatory)][string]$PrivateEndpointSubnetAddressPrefix
+    )
+
+    $virtualNetwork = Get-Ipv4CidrRange -Cidr $VirtualNetworkAddressPrefix
+    $runnerSubnet = Get-Ipv4CidrRange -Cidr $RunnerSubnetAddressPrefix
+    $privateEndpointSubnet = Get-Ipv4CidrRange -Cidr $PrivateEndpointSubnetAddressPrefix
+    $ranges = [ordered]@{
+        'Virtual network' = $virtualNetwork
+        'Runner subnet' = $runnerSubnet
+        'Private endpoint subnet' = $privateEndpointSubnet
+    }
+
+    foreach ($entry in $ranges.GetEnumerator()) {
+        $firstBlock = Get-Rfc1918Block -AddressNumber $entry.Value.Network
+        $lastBlock = Get-Rfc1918Block -AddressNumber $entry.Value.LastAddress
+        if (-not $firstBlock -or $firstBlock -ne $lastBlock) {
+            throw "$($entry.Key) CIDR '$($entry.Value.Cidr)' must be entirely within one RFC 1918 range."
+        }
+        if ($entry.Value.PrefixLength -gt 29) {
+            throw "$($entry.Key) CIDR '$($entry.Value.Cidr)' must contain at least eight addresses."
+        }
+    }
+
+    foreach ($subnet in @($runnerSubnet, $privateEndpointSubnet)) {
+        if ($subnet.Network -lt $virtualNetwork.Network -or
+            $subnet.LastAddress -gt $virtualNetwork.LastAddress -or
+            $subnet.PrefixLength -le $virtualNetwork.PrefixLength) {
+            throw "Subnet CIDR '$($subnet.Cidr)' must be contained by and smaller than '$($virtualNetwork.Cidr)'."
+        }
+    }
+
+    if ($runnerSubnet.Network -le $privateEndpointSubnet.LastAddress -and
+        $privateEndpointSubnet.Network -le $runnerSubnet.LastAddress) {
+        throw "Runner and private endpoint subnet CIDRs must not overlap."
+    }
+}
+
+function Test-Ipv4AddressInCidr {
+    param(
+        [Parameter(Mandatory)][string]$Address,
+        [Parameter(Mandatory)][string]$Cidr
+    )
+
+    $range = Get-Ipv4CidrRange -Cidr $Cidr
+    $addressNumber = ConvertTo-Ipv4Number -Address $Address
+    return (
+        $addressNumber -ge $range.Network -and
+        $addressNumber -le $range.LastAddress
+    )
+}
+
 function Get-RunnerNetworkContract {
     param([Parameter(Mandatory)][object]$Infrastructure)
 

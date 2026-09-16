@@ -13,20 +13,39 @@ requested capability to its implementation and proof gate. Use the
 [internal showcase runbook](docs/internal-showcase.md) to demonstrate the result without relying on
 screenshots or rerunning tenant mutations.
 
+## Public template safety
+
+This repository contains no populated tenant, subscription, user, object, application, policy,
+certificate, passphrase, token, or deployed-resource identifiers. Values written as `<placeholder>`
+are required operator inputs and must be replaced only in the local shell or ignored runtime state.
+Do not commit a populated `.env` file or any file under `.auth`, `.lab-secrets`, `.lab-state`, or
+`.artifacts`.
+
+Some literals intentionally remain because they are public platform constants, not customer data:
+
+- Microsoft Graph first-party application/resource IDs and a Microsoft-managed policy template ID;
+- Azure built-in Key Vault role definition IDs;
+- Microsoft service endpoints;
+- SHA-256 pins for GitHub Actions, runner archives, and Microsoft container images.
+
+The deployment discovers every tenant-specific and subscription-specific value at runtime and
+writes it only to Git-ignored state. The example environment file contains comments and
+nonfunctional placeholders.
+
 ## End-to-end Azure runner architecture
 
 ```mermaid
 flowchart LR
     GH[GitHub Actions workflow dispatch]
     ACI[Ephemeral Azure Container Instance<br/>Playwright image + one-job runner]
-    RS[Runner subnet 10.42.1.0/24<br/>ACI delegated]
+    RS[Operator-selected RFC1918 runner subnet<br/>ACI delegated]
     NAT[NAT Gateway<br/>static outbound IP]
     DNS[Private DNS<br/>privatelink.vaultcore.azure.net]
-    PE[Key Vault Private Endpoint<br/>10.42.2.4]
+    PE[Key Vault Private Endpoint<br/>deployment-assigned private IP]
     KV[Key Vault<br/>public access disabled]
     ENTRA[Microsoft Entra<br/>OIDC exchange + CBA]
     APP[Azure Static Web App<br/>exact identity claims]
-    ART[Sanitized GitHub evidence<br/>artifact or bounded job log]
+    ART[Sanitized GitHub evidence<br/>mandatory private artifact]
 
     GH -->|unique runner label| ACI
     ACI --- RS
@@ -99,9 +118,18 @@ Run commands from `solutions\entra-cba-playwright` in PowerShell 7. The referenc
 ### Phase 0: establish operator context
 
 ```powershell
-$subscription = '<subscription-id-or-name>'
-$tenantId = '<tenant-id>'
-$testUserUpn = 'cba-playwright-test@contoso.onmicrosoft.com'
+$repository = '<github-owner>/<repository-name>' # Repository containing this solution on main.
+$subscription = '<azure-subscription-id-or-name>' # Operator input; never commit a populated value.
+$tenantId = '<entra-tenant-id>' # Tenant that will contain the disposable test identity.
+$resourceGroup = '<resource-group-name>' # New or existing isolated lab resource group.
+$location = '<azure-region>' # Region supporting ACI, NAT Gateway, Key Vault and Static Web Apps.
+$testUserUpn = '<dedicated-test-user-upn>' # Disposable lab identity; never use a production user.
+$certificatePolicyOid = '<organization-controlled-certificate-policy-oid>'
+
+# Select non-overlapping RFC1918 ranges for the target network.
+$virtualNetworkAddressPrefix = '<virtual-network-cidr>'
+$runnerSubnetAddressPrefix = '<aci-runner-subnet-cidr>'
+$privateEndpointSubnetAddressPrefix = '<private-endpoint-subnet-cidr>'
 
 npm ci
 npx playwright install chromium
@@ -119,10 +147,20 @@ Confirm that the Azure account is in the intended tenant and subscription and th
 .\scripts\Deploy-Infrastructure.ps1 `
     -Subscription $subscription `
     -ExpectedTenantId $tenantId `
+    -ResourceGroup $resourceGroup `
+    -Location $location `
+    -VirtualNetworkAddressPrefix $virtualNetworkAddressPrefix `
+    -RunnerSubnetAddressPrefix $runnerSubnetAddressPrefix `
+    -PrivateEndpointSubnetAddressPrefix $privateEndpointSubnetAddressPrefix `
     -WhatIf
 .\scripts\Deploy-Infrastructure.ps1 `
     -Subscription $subscription `
-    -ExpectedTenantId $tenantId
+    -ExpectedTenantId $tenantId `
+    -ResourceGroup $resourceGroup `
+    -Location $location `
+    -VirtualNetworkAddressPrefix $virtualNetworkAddressPrefix `
+    -RunnerSubnetAddressPrefix $runnerSubnetAddressPrefix `
+    -PrivateEndpointSubnetAddressPrefix $privateEndpointSubnetAddressPrefix
 ```
 
 The deployment creates the Static Web App, VNet, ACI-delegated runner subnet, NAT Gateway and static public IP, Private Endpoint subnet, private DNS zone and VNet link, private Key Vault, and workload identities. The script persists discovered resource IDs and addresses under `.lab-state`, which is Git-ignored.
@@ -139,7 +177,9 @@ Before any runner launch, `Runner-Network.ps1` reads ARM and rejects the topolog
 ### Phase 2: create the disposable two-level certificate test
 
 ```powershell
-.\scripts\New-LabPki.ps1 -TestUserUpn $testUserUpn
+.\scripts\New-LabPki.ps1 `
+    -TestUserUpn $testUserUpn `
+    -PolicyOid $certificatePolicyOid
 ```
 
 The script creates one disposable root CA and two user certificates for the same dedicated test identity:
@@ -201,9 +241,9 @@ and Conditional Access receipt binds to the same tested repository revision.
 
 ```powershell
 .\scripts\Publish-LabAssets.ps1
-$proofBranch = (git branch --show-current).Trim()
 .\scripts\Configure-GitHubOidc.ps1 `
-    -AllowedBranches @('main', $proofBranch)
+    -Repository $repository `
+    -AllowedBranches @('main')
 ```
 
 The publisher receives secret-write access only during publication and runs an Azure CLI image
@@ -215,16 +255,13 @@ certificate.
 
 ### Phase 7: run Playwright on the ephemeral Azure runner
 
-For the first feature-branch proof, commit and push the workflow so the `push` event creates the queued run. Then execute:
+After the workflow exists on the repository's default branch, execute:
 
 ```powershell
-.\scripts\Start-EphemeralGitHubRunner.ps1
-```
-
-After the workflow exists on the default branch, execute:
-
-```powershell
-.\scripts\Start-EphemeralGitHubRunner.ps1 -Dispatch
+.\scripts\Start-EphemeralGitHubRunner.ps1 `
+    -Repository $repository `
+    -Dispatch `
+    -Ref main
 ```
 
 The launcher:
@@ -346,8 +383,9 @@ A browser-visible rejection alone is not enough. A global MFA policy failure, a 
 ## Verified target results
 
 A run from another repository does not satisfy this solution's proof contract. The accepted result
-must originate from `samitks77/dev-agents-solutions`, use the immutable repository OIDC subject and
-match the exact target commit. After a completed deployment, run:
+must originate from the operator-supplied repository recorded in ignored GitHub state, use that
+repository's immutable OIDC subject, and match the exact target commit. After a completed
+deployment, run:
 
 ```powershell
 .\scripts\Show-E2eProof.ps1

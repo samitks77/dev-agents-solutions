@@ -17,6 +17,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 
 $stateDirectory = Join-Path $labRoot '.lab-state'
 . (Join-Path $PSScriptRoot 'Proof-Set.ps1')
+. (Join-Path $PSScriptRoot 'Runner-Network.ps1')
 $paths = [ordered]@{
     application = Join-Path $stateDirectory 'application.json'
     conditionalAccess = Join-Path $stateDirectory 'conditional-access.json'
@@ -398,7 +399,9 @@ Add-ProofCheck `
         $network.runner.label -eq $runner.label -and
         $network.runner.os -eq 'Linux' -and
         @($network.runner.privateIpv4Addresses).Count -eq 1 -and
-        [string]$network.runner.privateIpv4Addresses[0] -like '10.42.1.*'
+        (Test-Ipv4AddressInCidr `
+            -Address ([string]$network.runner.privateIpv4Addresses[0]) `
+            -Cidr ([string]$runner.network.runnerSubnetCidr))
     ) `
     -Source 'Re-hashed runner receipt' `
     -Evidence (

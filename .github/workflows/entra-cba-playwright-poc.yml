@@ -1,13 +1,6 @@
 name: Entra CBA Playwright POC
 
 on:
-  push:
-    branches:
-      - main
-      - feature/entra-cba-playwright
-    paths:
-      - .github/workflows/entra-cba-playwright-poc.yml
-      - solutions/entra-cba-playwright/**
   workflow_dispatch:
     inputs:
       verification_id:
