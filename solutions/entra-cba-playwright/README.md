@@ -111,7 +111,8 @@ launcher recomputes every commitment it can from ignored local state, rejects cr
 cross-identity evidence, and deletes the remote artifact after verified download. It also downloads
 the completed public job log and fails if any exact, URL-encoded, or Base64-encoded lab value is
 present. Receipt and log hashes are recorded only after ACI deletion, artifact deletion, and GitHub
-runner deregistration are verified.
+runner deregistration are verified. The transient ACI address is retained only in Git-ignored local
+state so a later operator can replay the same complete log-privacy value set.
 
 ### Why there is no Private Link Service
 
