@@ -13,6 +13,27 @@ requested capability to its implementation and proof gate. Use the
 [internal showcase runbook](docs/internal-showcase.md) to demonstrate the result without relying on
 screenshots or rerunning tenant mutations.
 
+## Customer-ready validation package
+
+Download the
+[full end-to-end test results and manual operator runbook](docs/entra-cba-playwright-e2e-test-results-and-runbook.pdf).
+The 28-page report explains why and how each of the 35 proof checks was performed, records the
+observed result and evidence source for every check, and provides:
+
+- a safe public-proof verification path with no tenant mutation;
+- a read-only live evidence-replay path for an authorized operator with retained local state;
+- the complete fresh deployment, browser, GitHub runner, Conditional Access, recovery, cleanup and
+  teardown procedure;
+- expected outputs, stop conditions, troubleshooting guidance and a blank evidence record for a new
+  run.
+
+Published PDF SHA-256:
+`55880dc954107bb3e2b23b57377abd6a9af8e57bc8c4e4284f3062b6be31fb98`.
+
+The report is deliberately sanitized: it contains no credential, private key, certificate,
+passphrase, token, raw sign-in record, tenant/subscription/user/object/policy identifier, deployed
+hostname or IP address.
+
 ## Public template safety
 
 This repository contains no populated tenant, subscription, user, object, application, policy,
