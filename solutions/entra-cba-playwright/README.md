@@ -28,11 +28,11 @@ observed result and evidence source for every check, and provides:
   run.
 
 Published PDF SHA-256:
-`55880dc954107bb3e2b23b57377abd6a9af8e57bc8c4e4284f3062b6be31fb98`.
+`3652ac22fa468a13374fcd2c6a74c339ca44a9da94554ef0c269982304e5195a`.
 
 The report is deliberately sanitized: it contains no credential, private key, certificate,
-passphrase, token, raw sign-in record, tenant/subscription/user/object/policy identifier, deployed
-hostname or IP address.
+passphrase, token, raw sign-in record, tenant/subscription/user/object/application/policy identifier,
+sign-in correlation or workflow-run identifier, deployed hostname, or IP address.
 
 ## Public template safety
 
