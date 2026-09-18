@@ -20,6 +20,7 @@ $conditionalAccessOperationPath = Join-Path `
     'conditional-access-operation.json'
 $teardownStatePath = Join-Path $stateDirectory 'entra-teardown.json'
 . (Join-Path $PSScriptRoot 'Teardown-State.ps1')
+. (Join-Path $PSScriptRoot 'Graph-Reconciliation.ps1')
 New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
 $lifecycleLockPath = Join-Path $stateDirectory 'lab-lifecycle.lock'
 try {
@@ -256,58 +257,6 @@ if (-not $context -or $context.TenantId -ne $TenantId -or $missingScopes.Count -
 $policyUri = 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/x509Certificate'
 $pkiCollectionUri = 'https://graph.microsoft.com/v1.0/directory/publicKeyInfrastructure/certificateBasedAuthConfigurations'
 
-function Get-GraphCollection {
-    param([Parameter(Mandatory)][string]$Uri)
-
-    $items = [Collections.Generic.List[object]]::new()
-    while ($Uri) {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $Uri
-        foreach ($item in @($response.value)) {
-            $items.Add($item)
-        }
-        $Uri = if ($response -is [Collections.IDictionary]) {
-            if ($response.Contains('@odata.nextLink')) {
-                [string]$response['@odata.nextLink']
-            } else {
-                $null
-            }
-        } else {
-            $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-            if ($null -ne $nextLinkProperty) {
-                [string]$nextLinkProperty.Value
-            } else {
-                $null
-            }
-        }
-    }
-    return $items.ToArray()
-}
-
-function Get-ReconciledTeardownMatches {
-    param(
-        [Parameter(Mandatory)][scriptblock]$Lookup,
-        [switch]$WaitForAppearance
-    )
-
-    $appearanceDeadline = (Get-Date).AddMinutes(10)
-    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
-    $consecutiveAbsenceChecks = 0
-    do {
-        $matches = @(& $Lookup)
-        if ($matches.Count -ne 0 -or -not $WaitForAppearance) {
-            return $matches
-        }
-        if ((Get-Date) -ge $appearanceDeadline) {
-            $consecutiveAbsenceChecks++
-            if ($consecutiveAbsenceChecks -ge 3) {
-                return @()
-            }
-        }
-        Start-Sleep -Seconds 10
-    } while ((Get-Date) -lt $absenceDeadline)
-    throw 'Microsoft Graph object absence could not be proven after the teardown appearance window.'
-}
-
 function Assert-ReconciledGraphAbsence {
     param(
         [Parameter(Mandatory)][scriptblock]$Lookup,
@@ -356,7 +305,7 @@ if (Test-Path -LiteralPath $conditionalAccessStatePath) {
     }
 }
 
-$pkiMatches = @(Get-ReconciledTeardownMatches -Lookup {
+$pkiMatches = @(Get-ReconciledGraphMatches -Lookup {
     $livePkis = @(Get-GraphCollection -Uri $pkiCollectionUri)
     if ($entra.pkiId) {
         @($livePkis | Where-Object { $_.id -eq $entra.pkiId })
@@ -390,7 +339,7 @@ if ($pki) {
     }
     $certificateAuthorities = @(Get-GraphCollection `
         -Uri "$pkiCollectionUri/$($pki.id)/certificateAuthorities")
-    $caMatches = @(Get-ReconciledTeardownMatches -Lookup {
+    $caMatches = @(Get-ReconciledGraphMatches -Lookup {
         $liveCas = @(Get-GraphCollection `
             -Uri "$pkiCollectionUri/$($pki.id)/certificateAuthorities")
         if ($entra.caId) {
@@ -427,7 +376,7 @@ $expectedGroupName = if ($entra.groupDisplayName) {
 } else {
     'grp-entra-cba-playwright-poc'
 }
-$groups = @(Get-ReconciledTeardownMatches -Lookup {
+$groups = @(Get-ReconciledGraphMatches -Lookup {
     if ($entra.groupId) {
         $groupFilter = [Uri]::EscapeDataString("id eq '$($entra.groupId)'")
         @(Get-GraphCollection `
@@ -478,7 +427,7 @@ if (
     throw 'The recorded group ID has an unexpected lab identity.'
 }
 
-$users = @(Get-ReconciledTeardownMatches -Lookup {
+$users = @(Get-ReconciledGraphMatches -Lookup {
     if ($entra.testUserId) {
         $userFilter = [Uri]::EscapeDataString("id eq '$($entra.testUserId)'")
         @(Get-GraphCollection `

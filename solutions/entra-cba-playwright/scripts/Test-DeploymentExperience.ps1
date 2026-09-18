@@ -27,6 +27,141 @@ function Assert-ExactSet {
     }
 }
 
+. (Join-Path $PSScriptRoot 'Graph-Reconciliation.ps1')
+. (Join-Path $PSScriptRoot 'Entra-Operation.ps1')
+
+$firstPageUri = 'https://graph.test/collection?page=1'
+$secondPageUri = 'https://graph.test/collection?page=2'
+$requestedPageUris = [Collections.Generic.List[string]]::new()
+$pageResponses = @{}
+$pageResponses[$firstPageUri] = [ordered]@{
+    '@odata.nextLink' = $secondPageUri
+    value = @([pscustomobject]@{ id = 'first-page-item' })
+}
+$pageResponses[$secondPageUri] = [pscustomobject]@{
+    value = @([pscustomobject]@{ id = 'second-page-item' })
+}
+$pagedItems = @(Get-GraphCollection -Uri $firstPageUri -InvokeRequest {
+    param([string]$RequestUri)
+    $requestedPageUris.Add($RequestUri)
+    return $pageResponses[$RequestUri]
+})
+Assert-ExactSet `
+    -Actual @($pagedItems.id) `
+    -Expected @('first-page-item', 'second-page-item') `
+    -Label 'Mocked paginated Graph collection'
+Assert-ExactSet `
+    -Actual @($requestedPageUris) `
+    -Expected @($firstPageUri, $secondPageUri) `
+    -Label 'Mocked Graph page traversal'
+
+$lateAppearanceClock = [pscustomobject]@{
+    now = [DateTimeOffset]::Parse('2026-01-01T00:00:00Z')
+}
+$lateAppearanceStartedAt = $lateAppearanceClock.now
+$lateAppearanceLookup = [pscustomobject]@{ calls = 0 }
+$lateMatches = @(Get-ReconciledGraphMatches `
+    -Lookup {
+        $lateAppearanceLookup.calls++
+        if (
+            $lateAppearanceClock.now -ge
+                $lateAppearanceStartedAt.AddSeconds(25)
+        ) {
+            return [pscustomobject]@{ id = 'late-object' }
+        }
+        return @()
+    } `
+    -WaitForAppearance `
+    -AppearanceSeconds 20 `
+    -AbsenceSeconds 15 `
+    -PollSeconds 5 `
+    -GetNow { $lateAppearanceClock.now } `
+    -Sleep {
+        param([int]$Seconds)
+        $lateAppearanceClock.now = $lateAppearanceClock.now.AddSeconds($Seconds)
+    })
+if (
+    $lateMatches.Count -ne 1 -or
+    $lateMatches[0].id -cne 'late-object' -or
+    $lateAppearanceLookup.calls -lt 6
+) {
+    throw 'Graph recovery did not retain a late-appearing object through the absence window.'
+}
+
+$absenceClock = [pscustomobject]@{
+    now = [DateTimeOffset]::Parse('2026-01-01T00:00:00Z')
+}
+$absenceStartedAt = $absenceClock.now
+$absenceLookup = [pscustomobject]@{ calls = 0 }
+$absentMatches = @(Get-ReconciledGraphMatches `
+    -Lookup {
+        $absenceLookup.calls++
+        return @()
+    } `
+    -WaitForAppearance `
+    -AppearanceSeconds 20 `
+    -AbsenceSeconds 15 `
+    -PollSeconds 5 `
+    -GetNow { $absenceClock.now } `
+    -Sleep {
+        param([int]$Seconds)
+        $absenceClock.now = $absenceClock.now.AddSeconds($Seconds)
+    })
+if (
+    $absentMatches.Count -ne 0 -or
+    $absenceLookup.calls -lt 7 -or
+    $absenceClock.now -lt $absenceStartedAt.AddSeconds(30)
+) {
+    throw 'Graph recovery accepted absence without three post-appearance observations.'
+}
+
+$pendingOperationId = [guid]::NewGuid()
+$pendingOperation = [ordered]@{
+    baselinePkiSha256 = 'a' * 64
+    baselinePolicySha256 = 'b' * 64
+    caCreated = $false
+    caId = $null
+    caStatus = 'pending'
+    groupCreated = $false
+    groupDisplayName = 'group-under-test'
+    groupId = $null
+    groupStatus = 'pending'
+    membershipAdded = $false
+    membershipStatus = 'pending'
+    operationId = $pendingOperationId.ToString('D')
+    ownershipMarker = "entra-cba-playwright/$($pendingOperationId.ToString('D'))"
+    pkiCreated = $false
+    pkiId = $null
+    pkiObjectDisplayName = "pki-under-test [$($pendingOperationId.ToString('N'))]"
+    pkiStatus = 'pending'
+    policyOid = @(1, 2, 3, 4) -join '.'
+    policyStatus = 'pending'
+    requestedPkiDisplayName = 'pki-under-test'
+    schemaVersion = 1
+    status = 'provisioning'
+    testUserCreated = $false
+    testUserDisplayName = 'user-under-test'
+    testUserId = $null
+    testUserStatus = 'pending'
+    testUserUpn = 'user-under-test@example.invalid'
+    tenantId = 'tenant-under-test'
+}
+if (-not (Test-EntraOperationHasNoMutationAttempt `
+    -Operation $pendingOperation `
+    -TenantId 'tenant-under-test')) {
+    throw 'An all-pending Entra journal was not recognized as safely retirable.'
+}
+$plannedOperation = [ordered]@{}
+foreach ($entry in $pendingOperation.GetEnumerator()) {
+    $plannedOperation[$entry.Key] = $entry.Value
+}
+$plannedOperation.groupStatus = 'planned'
+if (Test-EntraOperationHasNoMutationAttempt `
+    -Operation $plannedOperation `
+    -TenantId 'tenant-under-test') {
+    throw 'An Entra journal with an attempted mutation was treated as safely retirable.'
+}
+
 $templatePath = Join-Path `
     $labRoot `
     'templates\azuredeploy\entra-cba-playwright-infrastructure.json'
@@ -159,8 +294,8 @@ $teardownScript = Get-Content `
 if (
     $teardownScript -notmatch 'conditional-access-isolation\.lock' -or
     $teardownScript -notmatch "\.status\s+-cne\s+'restored'" -or
-    $teardownScript -notmatch
-        '\$absenceDeadline\s*=\s*\$appearanceDeadline\.AddSeconds\(30\)' -or
+    $teardownScript -notmatch 'Graph-Reconciliation\.ps1' -or
+    $teardownScript -notmatch 'Get-ReconciledGraphMatches' -or
     $teardownScript -notmatch 'Assert-ReconciledGraphAbsence'
 ) {
     throw 'Teardown is not guarded by the restored Conditional Access isolation transaction.'
@@ -268,6 +403,12 @@ $entraConfiguration = Get-Content `
     -LiteralPath (Join-Path $PSScriptRoot 'Configure-EntraCba.ps1') `
     -Raw
 $entraJournalIndex = $entraConfiguration.IndexOf('$entraOperation = [ordered]@{')
+$entraPendingRetirementIndex = $entraConfiguration.IndexOf(
+    'Test-EntraOperationHasNoMutationAttempt `'
+)
+$entraContractFailureIndex = $entraConfiguration.IndexOf(
+    "throw 'Entra provisioning journal does not match the exact requested ownership contract.'"
+)
 $entraUserCreateIndex = $entraConfiguration.IndexOf(
     "Invoke-GraphJson -Method POST -Uri 'https://graph.microsoft.com/v1.0/users'"
 )
@@ -278,6 +419,8 @@ if (
     $entraConfiguration -notmatch 'ownershipMarker' -or
     $entraConfiguration -notmatch 'Get-ReconciledGraphMatches' -or
     $entraConfiguration -notmatch 'Write-EntraStateAtomically' -or
+    $entraPendingRetirementIndex -lt 0 -or
+    $entraContractFailureIndex -le $entraPendingRetirementIndex -or
     $entraJournalIndex -lt 0 -or
     $entraUserCreateIndex -le $entraJournalIndex
 ) {
@@ -357,18 +500,17 @@ $conditionalAccessCreateIndex = $conditionalAccessConfiguration.IndexOf(
 if (
     $conditionalAccessConfiguration -notmatch 'conditional-access-operation\.json' -or
     $conditionalAccessConfiguration -notmatch 'conditional-access-operation\.lock' -or
-    $conditionalAccessConfiguration -notmatch '\(Get-Date\)\.AddMinutes\(10\)' -or
     $conditionalAccessJournalIndex -lt 0 -or
     $conditionalAccessCreateIndex -le $conditionalAccessJournalIndex
 ) {
     throw 'Conditional Access creation lacks serialized, reconcilable ownership state.'
 }
 if (
-    $conditionalAccessConfiguration -notmatch 'function Get-GraphCollection' -or
+    $conditionalAccessConfiguration -notmatch 'Graph-Reconciliation\.ps1' -or
+    $conditionalAccessConfiguration -notmatch 'Get-GraphCollection' -or
+    $conditionalAccessConfiguration -notmatch 'Get-ReconciledGraphMatches' -or
     $conditionalAccessConfiguration -notmatch
         "policyStatus\s+-in\s+@\('planned',\s*'created'\)" -or
-    $conditionalAccessConfiguration -notmatch
-        '\$absenceDeadline\s*=\s*\$appearanceDeadline\.AddSeconds\(30\)' -or
     $conditionalAccessConfiguration -notmatch
         '\$provisionalConditionalAccessState'
 ) {

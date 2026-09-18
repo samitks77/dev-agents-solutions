@@ -12,6 +12,7 @@ $stateDirectory = Join-Path $labRoot '.lab-state'
 $applicationStatePath = Join-Path $stateDirectory 'application.json'
 $entraStatePath = Join-Path $stateDirectory 'entra.json'
 $evidencePath = Join-Path $stateDirectory 'sign-in-evidence.json'
+. (Join-Path $PSScriptRoot 'Graph-Reconciliation.ps1')
 
 foreach ($requiredPath in @($applicationStatePath, $entraStatePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -57,27 +58,7 @@ $filter = [Uri]::EscapeDataString(
 )
 $uri = "https://graph.microsoft.com/beta/auditLogs/signIns?`$filter=$filter&`$orderby=createdDateTime desc&`$top=100"
 
-$entries = [Collections.Generic.List[object]]::new()
-while ($uri) {
-    $response = Invoke-MgGraphRequest -Method GET -Uri $uri
-    foreach ($entry in @($response.value)) {
-        $entries.Add($entry)
-    }
-    $uri = if ($response -is [Collections.IDictionary]) {
-        if ($response.Contains('@odata.nextLink')) {
-            [string]$response['@odata.nextLink']
-        } else {
-            $null
-        }
-    } else {
-        $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-        if ($null -ne $nextLinkProperty) {
-            [string]$nextLinkProperty.Value
-        } else {
-            $null
-        }
-    }
-}
+$entries = @(Get-GraphCollection -Uri $uri)
 
 if ($entries.Count -eq 0) {
     throw "No sign-in records were returned for '$($entra.testUserUpn)' in the last $LookbackHours hour(s)."

@@ -32,6 +32,7 @@ catch [IO.IOException] {
     throw 'Another Conditional Access configuration owns the exclusive local lock.'
 }
 try {
+. (Join-Path $PSScriptRoot 'Graph-Reconciliation.ps1')
 
 foreach ($requiredPath in @($applicationStatePath, $entraStatePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -116,58 +117,6 @@ function Invoke-GraphJson {
         -Uri $Uri `
         -Body ($Body | ConvertTo-Json -Depth 20) `
         -ContentType 'application/json'
-}
-
-function Get-GraphCollection {
-    param([Parameter(Mandatory)][string]$Uri)
-
-    $items = [Collections.Generic.List[object]]::new()
-    while ($Uri) {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $Uri
-        foreach ($item in @($response.value)) {
-            $items.Add($item)
-        }
-        $Uri = if ($response -is [Collections.IDictionary]) {
-            if ($response.Contains('@odata.nextLink')) {
-                [string]$response['@odata.nextLink']
-            } else {
-                $null
-            }
-        } else {
-            $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-            if ($null -ne $nextLinkProperty) {
-                [string]$nextLinkProperty.Value
-            } else {
-                $null
-            }
-        }
-    }
-    return $items.ToArray()
-}
-
-function Get-ReconciledGraphMatches {
-    param(
-        [Parameter(Mandatory)][scriptblock]$Lookup,
-        [switch]$WaitForAppearance
-    )
-
-    $appearanceDeadline = (Get-Date).AddMinutes(10)
-    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
-    $consecutiveAbsenceChecks = 0
-    do {
-        $matches = @(& $Lookup)
-        if ($matches.Count -ne 0 -or -not $WaitForAppearance) {
-            return $matches
-        }
-        if ((Get-Date) -ge $appearanceDeadline) {
-            $consecutiveAbsenceChecks++
-            if ($consecutiveAbsenceChecks -ge 3) {
-                return @()
-            }
-        }
-        Start-Sleep -Seconds 10
-    } while ((Get-Date) -lt $absenceDeadline)
-    throw 'Conditional Access policy absence could not be proven after the appearance window.'
 }
 
 function Get-ConditionalAccessPolicy {
