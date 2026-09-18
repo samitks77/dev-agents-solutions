@@ -45,6 +45,26 @@ $guidPattern = '(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b'
 $ipv4Pattern = '(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?(?![\d.])'
 $subjectKeyIdentifierOid = @(2, 5, 29, 14) -join '.'
 $subjectKeyIdentifierSource = "$solutionPrefix/scripts/New-LabPki.ps1"
+# The mandatory, fixed ARM/Bicep deployment-schema contentVersion literal present in every ARM
+# template and parameters file (see https://aka.ms/arm-template-schema); it identifies no tenant,
+# subscription, or deployed resource. Built from digits rather than written inline so this script's
+# own source never contains a literal dotted-quad that this file's own IPv4 scan would flag.
+$armContentVersionLiteral = @(1, 0, 0, 0) -join '.'
+$safePortalNetworkSources = @(
+    "$solutionPrefix/infra/portal.bicep",
+    "$solutionPrefix/templates/azuredeploy/entra-cba-playwright-infrastructure.json"
+)
+$safePortalNetworkCidrs = @(
+    "$(@(10, 42, 0, 0) -join '.')/24",
+    "$(@(10, 42, 0, 0) -join '.')/26",
+    "$(@(10, 42, 0, 64) -join '.')/26",
+    "$(@(172, 20, 42, 0) -join '.')/24",
+    "$(@(172, 20, 42, 0) -join '.')/26",
+    "$(@(172, 20, 42, 64) -join '.')/26",
+    "$(@(192, 168, 42, 0) -join '.')/24",
+    "$(@(192, 168, 42, 0) -join '.')/26",
+    "$(@(192, 168, 42, 64) -join '.')/26"
+)
 $forbiddenPatterns = [ordered]@{
     'Entra tenant UPN' = '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.onmicrosoft\.com\b'
     'Azure subscription resource ID' = '(?i)/subscriptions/[0-9a-f-]{36}\b'
@@ -82,7 +102,23 @@ foreach ($relativePath in $candidateFiles) {
                 '[''"]'
             )
         )
-        if (-not $isSubjectKeyIdentifierOid) {
+        $isArmContentVersion = (
+            $match.Value -ceq $armContentVersionLiteral -and
+            $line -match (
+                '"contentVersion"\s*:\s*"' +
+                [regex]::Escape($armContentVersionLiteral) +
+                '"'
+            )
+        )
+        $isSafePortalNetwork = (
+            $safePortalNetworkSources -ccontains $relativePath -and
+            $safePortalNetworkCidrs -ccontains $match.Value
+        )
+        if (
+            -not $isSubjectKeyIdentifierOid -and
+            -not $isArmContentVersion -and
+            -not $isSafePortalNetwork
+        ) {
             $failures.Add("$relativePath contains literal IPv4 address or CIDR '$($match.Value)'.")
         }
     }

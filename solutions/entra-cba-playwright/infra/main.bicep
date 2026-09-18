@@ -19,6 +19,12 @@ param runnerSubnetAddressPrefix string
 @description('Non-overlapping RFC1918 address prefix used by private endpoints.')
 param privateEndpointSubnetAddressPrefix string
 
+@description('Required acknowledgement: deploying the two user-assigned managed identities causes Azure to create their backing Microsoft Entra service principals. No other Entra configuration is performed.')
+@allowed([
+  true
+])
+param confirmManagedIdentityServicePrincipals bool
+
 var suffix = uniqueString(subscription().subscriptionId, resourceGroup().id)
 var logAnalyticsName = 'log-entra-cba-pw-${suffix}'
 var keyVaultPrivateEndpointName = 'pep-${runnerVaultName}'
@@ -58,13 +64,17 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: workloadIdentityName
   location: location
-  tags: tags
+  tags: union(tags, {
+    managedIdentityServicePrincipalCreationAcknowledged: string(confirmManagedIdentityServicePrincipals)
+  })
 }
 
 resource publisherIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: publisherIdentityName
   location: location
-  tags: tags
+  tags: union(tags, {
+    managedIdentityServicePrincipalCreationAcknowledged: string(confirmManagedIdentityServicePrincipals)
+  })
 }
 
 resource runnerOutboundIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = {

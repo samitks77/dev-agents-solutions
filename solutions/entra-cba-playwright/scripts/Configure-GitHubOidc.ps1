@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Repository,
+    [ValidateSet('entra-cba-poc', IgnoreCase = $false)]
     [string]$Environment = 'entra-cba-poc',
     [string[]]$AllowedBranches = @('main'),
     [string]$FederatedCredentialName = 'github-entra-cba-poc'
@@ -16,6 +17,7 @@ $entraStatePath = Join-Path $stateDirectory 'entra.json'
 $infrastructureStatePath = Join-Path $stateDirectory 'infrastructure.json'
 $githubStatePath = Join-Path $stateDirectory 'github.json'
 . (Join-Path $PSScriptRoot 'Runner-Network.ps1')
+. (Join-Path $PSScriptRoot 'Federated-Credential.ps1')
 
 foreach ($requiredPath in @($applicationStatePath, $entraStatePath, $infrastructureStatePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -61,7 +63,8 @@ if ($repo.viewerPermission -ne 'ADMIN') {
 $repoIdentity = gh api "repos/$Repository" | ConvertFrom-Json
 if ($repoIdentity.full_name -cne $Repository -or
     -not $repoIdentity.id -or
-    -not $repoIdentity.owner.id) {
+    -not $repoIdentity.owner.id -or
+    -not $repoIdentity.owner.login) {
     throw "GitHub did not return the exact numeric identity for '$Repository'."
 }
 $oidcCustomization = gh api "repos/$Repository/actions/oidc/customization/sub" | ConvertFrom-Json
@@ -88,6 +91,178 @@ $resourceGroup = $infrastructure.resourceGroup
 $issuer = 'https://token.actions.githubusercontent.com'
 $subject = "$subjectPrefix`:environment:$Environment"
 $audience = 'api://AzureADTokenExchange'
+$encodedEnvironment = [Uri]::EscapeDataString($Environment)
+$environmentUri = "repos/$Repository/environments/$encodedEnvironment"
+$branchPoliciesUri = "$environmentUri/deployment-branch-policies"
+$expectedEnvironmentSecretNames = @(
+    'AZURE_CLIENT_ID'
+    'AZURE_TENANT_ID'
+    'CBA_APP_HOSTNAME_MASK'
+    'CBA_APP_URL'
+    'CBA_EXPECTED_OIDC_SUBJECT'
+    'CBA_TEST_OBJECT_ID'
+    'CBA_TEST_USERNAME'
+    'KEY_VAULT_NAME'
+    'KEY_VAULT_PRIVATE_ENDPOINT_IP'
+    'RUNNER_SUBNET_CIDR'
+)
+$allowedBranchSet = @($AllowedBranches | Sort-Object -CaseSensitive -Unique)
+if ($allowedBranchSet.Count -ne $AllowedBranches.Count) {
+    throw 'Duplicate deployment branches are not allowed.'
+}
+
+function Write-GitHubState {
+    param([Parameter(Mandatory)][Collections.IDictionary]$State)
+
+    $operationId = "$PID.$([guid]::NewGuid().ToString('N'))"
+    $temporaryPath = "$githubStatePath.$operationId.tmp"
+    $backupPath = "$githubStatePath.$operationId.bak"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($State | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false)
+        )
+        if (Test-Path -LiteralPath $githubStatePath) {
+            [IO.File]::Replace($temporaryPath, $githubStatePath, $backupPath, $true)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $githubStatePath)
+        }
+    }
+    finally {
+        foreach ($cleanupPath in @($temporaryPath, $backupPath)) {
+            if (Test-Path -LiteralPath $cleanupPath) {
+                Remove-Item -LiteralPath $cleanupPath -Force
+            }
+        }
+    }
+}
+
+function Assert-ExactStringSet {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Actual,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Expected,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $actualValues = @($Actual | ForEach-Object { [string]$_ } | Sort-Object -CaseSensitive)
+    $expectedValues = @($Expected | ForEach-Object { [string]$_ } | Sort-Object -CaseSensitive)
+    if (
+        $actualValues.Count -ne $expectedValues.Count -or
+        ($actualValues -join "`n") -cne ($expectedValues -join "`n")
+    ) {
+        throw "$Label does not match the exact expected set."
+    }
+}
+
+$existingGithubState = if (Test-Path -LiteralPath $githubStatePath -PathType Leaf) {
+    Get-Content -LiteralPath $githubStatePath -Raw | ConvertFrom-Json
+}
+else {
+    $null
+}
+$legacyGithubState = $false
+if ($existingGithubState) {
+    $statePropertyNames = @($existingGithubState.PSObject.Properties.Name)
+    $ownershipPropertyNames = @(
+        'environmentCreated'
+        'federatedCredentialCreated'
+        'ownerId'
+        'repositoryId'
+        'status'
+    )
+    $ownershipPropertyCount = @($ownershipPropertyNames | Where-Object {
+        $_ -in $statePropertyNames
+    }).Count
+    if ($ownershipPropertyCount -eq 0) {
+        $legacyRequiredProperties = @(
+            'allowedBranches'
+            'environment'
+            'environmentSecretNames'
+            'federatedCredentialName'
+            'immutableSubject'
+            'issuer'
+            'network'
+            'repository'
+            'subject'
+            'subjectPrefix'
+            'verifiedAt'
+            'workloadClientId'
+        )
+        $missingLegacyProperties = @($legacyRequiredProperties | Where-Object {
+            $_ -notin $statePropertyNames
+        })
+        Assert-ExactStringSet `
+            -Actual @($existingGithubState.environmentSecretNames) `
+            -Expected $expectedEnvironmentSecretNames `
+            -Label 'Legacy GitHub environment secret names'
+        if (
+            $missingLegacyProperties.Count -ne 0 -or
+            $existingGithubState.repository -cne $Repository -or
+            $existingGithubState.environment -cne $Environment -or
+            $existingGithubState.federatedCredentialName -cne $FederatedCredentialName -or
+            $existingGithubState.issuer -cne $issuer -or
+            $existingGithubState.subject -cne $subject -or
+            $existingGithubState.subjectPrefix -cne $subjectPrefix -or
+            $existingGithubState.workloadClientId -ne
+                $infrastructure.outputs.workloadClientId.value -or
+            $existingGithubState.immutableSubject -ne $true -or
+            -not $existingGithubState.network -or
+            $existingGithubState.network.runnerSubnetId -ne $runnerNetwork.runnerSubnetId -or
+            $existingGithubState.network.privateEndpointIp -ne $runnerNetwork.privateEndpointIp
+        ) {
+            throw 'Legacy GitHub state does not match the exact current lab contract.'
+        }
+        $legacyGithubState = $true
+    }
+    elseif ($ownershipPropertyCount -ne $ownershipPropertyNames.Count) {
+        throw 'Recorded GitHub state contains incomplete ownership metadata.'
+    }
+    elseif (
+        $existingGithubState.status -notin @('provisioning', 'verified') -or
+        $existingGithubState.repository -cne $Repository -or
+        [string]$existingGithubState.repositoryId -cne [string]$repoIdentity.id -or
+        [string]$existingGithubState.ownerId -cne [string]$repoIdentity.owner.id -or
+        $existingGithubState.environment -cne $Environment -or
+        $existingGithubState.federatedCredentialName -cne $FederatedCredentialName -or
+        $existingGithubState.issuer -cne $issuer -or
+        $existingGithubState.subject -cne $subject -or
+        $existingGithubState.subjectPrefix -cne $subjectPrefix -or
+        $existingGithubState.workloadClientId -ne
+            $infrastructure.outputs.workloadClientId.value -or
+        -not $existingGithubState.network -or
+        $existingGithubState.network.runnerSubnetId -ne $runnerNetwork.runnerSubnetId -or
+        $existingGithubState.network.privateEndpointIp -ne $runnerNetwork.privateEndpointIp -or
+        (
+            $existingGithubState.status -eq 'verified' -and
+            (
+                $existingGithubState.environmentCreated -ne $true -or
+                $existingGithubState.federatedCredentialCreated -ne $true
+            )
+        )
+    ) {
+        throw 'Recorded GitHub state does not prove ownership of this exact repository environment.'
+    }
+}
+
+$previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+$PSNativeCommandUseErrorActionPreference = $false
+try {
+    $environmentLookupOutput = @(
+        & gh api --silent $environmentUri 2>&1
+    )
+    $environmentLookupExitCode = $LASTEXITCODE
+}
+finally {
+    $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+}
+$environmentExists = $environmentLookupExitCode -eq 0
+if (-not $environmentExists -and (
+    ($environmentLookupOutput | ForEach-Object { [string]$_ }) -join "`n"
+) -notmatch '\(HTTP 404\)') {
+    throw "GitHub environment lookup failed with exit code $environmentLookupExitCode."
+}
 
 $existingCredentials = @(
     az identity federated-credential list `
@@ -95,10 +270,141 @@ $existingCredentials = @(
         --resource-group $resourceGroup `
         --output json | ConvertFrom-Json
 )
-$matchingCredentials = @($existingCredentials | Where-Object { $_.name -eq $FederatedCredentialName })
-if ($matchingCredentials.Count -gt 1) {
-    throw "More than one federated credential is named '$FederatedCredentialName'."
+$matchingCredentials = @($existingCredentials | Where-Object {
+    $_.name -ceq $FederatedCredentialName
+})
+$unexpectedCredentials = @($existingCredentials | Where-Object {
+    $_.name -cne $FederatedCredentialName
+})
+if ($unexpectedCredentials.Count -ne 0) {
+    throw (
+        'The workload identity has additional federated credentials outside the exact lab ' +
+        'contract. No credential was modified.'
+    )
 }
+if ($matchingCredentials.Count -ne 0) {
+    Assert-ExactFederatedCredentialSet `
+        -Credentials $existingCredentials `
+        -ExpectedName $FederatedCredentialName `
+        -ExpectedIssuer $issuer `
+        -ExpectedSubject $subject `
+        -ExpectedAudience $audience | Out-Null
+}
+
+if ($legacyGithubState) {
+    if (-not $environmentExists -or $matchingCredentials.Count -ne 1) {
+        throw 'Legacy GitHub state cannot be migrated because its exact live objects are missing.'
+    }
+    $legacyEnvironment = gh api $environmentUri | ConvertFrom-Json
+    $legacyBranchPolicies = @(
+        (gh api --paginate $branchPoliciesUri | ConvertFrom-Json).branch_policies
+    )
+    $recordedLegacyBranches = @(
+        $existingGithubState.allowedBranches |
+            Sort-Object -CaseSensitive -Unique
+    )
+    $liveLegacyBranches = @(
+        $legacyBranchPolicies.name |
+            Sort-Object -CaseSensitive -Unique
+    )
+    $liveLegacySecretNames = @(
+        gh api `
+            --paginate `
+            "$environmentUri/secrets?per_page=100" `
+            --jq '.secrets[].name' |
+            Sort-Object -CaseSensitive -Unique
+    )
+    Assert-ExactStringSet `
+        -Actual $liveLegacySecretNames `
+        -Expected $expectedEnvironmentSecretNames `
+        -Label 'Live legacy GitHub environment secret names'
+    if (
+        $recordedLegacyBranches.Count -ne
+            @($existingGithubState.allowedBranches).Count -or
+        $legacyBranchPolicies.Count -ne $recordedLegacyBranches.Count -or
+        @($legacyBranchPolicies | Where-Object { $_.type -cne 'branch' }).Count -ne 0 -or
+        (
+            Compare-Object `
+                -ReferenceObject $recordedLegacyBranches `
+                -DifferenceObject $liveLegacyBranches `
+                -CaseSensitive
+        ) -or
+        $legacyEnvironment.deployment_branch_policy.protected_branches -or
+        -not $legacyEnvironment.deployment_branch_policy.custom_branch_policies
+    ) {
+        throw 'Legacy GitHub state does not match the exact live environment configuration.'
+    }
+    $migratedGithubState = [ordered]@{
+        allowedBranches = @($recordedLegacyBranches)
+        environment = $Environment
+        environmentCreated = $true
+        environmentSecretNames = @($expectedEnvironmentSecretNames)
+        federatedCredentialCreated = $true
+        federatedCredentialName = $FederatedCredentialName
+        issuer = $issuer
+        immutableSubject = $true
+        network = $runnerNetwork
+        ownerId = [string]$repoIdentity.owner.id
+        repository = $Repository
+        repositoryId = [string]$repoIdentity.id
+        status = 'verified'
+        subjectPrefix = $subjectPrefix
+        subject = $subject
+        verifiedAt = (Get-Date).ToString('o')
+        workloadClientId = $infrastructure.outputs.workloadClientId.value
+    }
+    Write-GitHubState -State $migratedGithubState
+    $existingGithubState = [pscustomobject]$migratedGithubState
+}
+
+if (-not $existingGithubState -and (
+    $environmentExists -or $matchingCredentials.Count -ne 0
+)) {
+    throw (
+        'The GitHub environment or federated credential already exists without exact local ' +
+        'ownership state. Choose new disposable names.'
+    )
+}
+if ($existingGithubState -and $existingGithubState.environmentCreated -eq $true -and
+    -not $environmentExists) {
+    throw 'The exact recorded GitHub environment no longer exists; refusing to replace it implicitly.'
+}
+if ($existingGithubState -and $existingGithubState.federatedCredentialCreated -eq $true -and
+    $matchingCredentials.Count -eq 0) {
+    throw 'The exact recorded federated credential no longer exists; refusing to replace it implicitly.'
+}
+
+$githubState = [ordered]@{
+    allowedBranches = @($allowedBranchSet)
+    environment = $Environment
+    environmentCreated = if ($existingGithubState) {
+        [bool]$existingGithubState.environmentCreated
+    } else {
+        $false
+    }
+    environmentSecretNames = @()
+    federatedCredentialCreated = if ($existingGithubState) {
+        [bool]$existingGithubState.federatedCredentialCreated
+    } else {
+        $false
+    }
+    federatedCredentialName = $FederatedCredentialName
+    issuer = $issuer
+    immutableSubject = [bool]$oidcCustomization.use_immutable_subject
+    network = $runnerNetwork
+    ownerId = [string]$repoIdentity.owner.id
+    repository = $Repository
+    repositoryId = [string]$repoIdentity.id
+    status = 'provisioning'
+    subjectPrefix = $subjectPrefix
+    subject = $subject
+    verifiedAt = $null
+    workloadClientId = $infrastructure.outputs.workloadClientId.value
+}
+if (-not $existingGithubState) {
+    Write-GitHubState -State $githubState
+}
+
 if ($matchingCredentials.Count -eq 0) {
     az identity federated-credential create `
         --name $FederatedCredentialName `
@@ -108,19 +414,10 @@ if ($matchingCredentials.Count -eq 0) {
         --subject $subject `
         --audiences $audience `
         --output none
-} else {
-    az identity federated-credential update `
-        --name $FederatedCredentialName `
-        --identity-name $identityName `
-        --resource-group $resourceGroup `
-        --issuer $issuer `
-        --subject $subject `
-        --audiences $audience `
-        --output none
 }
+$githubState.federatedCredentialCreated = $true
+Write-GitHubState -State $githubState
 
-$encodedEnvironment = [Uri]::EscapeDataString($Environment)
-$environmentUri = "repos/$Repository/environments/$encodedEnvironment"
 $environmentBody = @{
     deployment_branch_policy = @{
         custom_branch_policies = $true
@@ -130,15 +427,12 @@ $environmentBody = @{
 $environmentResponse = $environmentBody |
     gh api --method PUT $environmentUri --input - |
     ConvertFrom-Json
+$githubState.environmentCreated = $true
+Write-GitHubState -State $githubState
 
-$branchPoliciesUri = "$environmentUri/deployment-branch-policies"
 $existingBranchPolicies = @(
     (gh api --paginate $branchPoliciesUri | ConvertFrom-Json).branch_policies
 )
-$allowedBranchSet = @($AllowedBranches | Sort-Object -CaseSensitive -Unique)
-if ($allowedBranchSet.Count -ne $AllowedBranches.Count) {
-    throw 'Duplicate deployment branches are not allowed.'
-}
 foreach ($policy in $existingBranchPolicies) {
     if ($policy.type -cne 'branch' -or $allowedBranchSet -cnotcontains $policy.name) {
         gh api `
@@ -182,11 +476,10 @@ $verifiedSecretNames = @(
         "$environmentUri/secrets?per_page=100" `
         --jq '.secrets[].name'
 )
-foreach ($secretName in $environmentSecrets.Keys) {
-    if ($verifiedSecretNames -cnotcontains $secretName) {
-        throw "GitHub environment secret '$secretName' was not verified after creation."
-    }
-}
+Assert-ExactStringSet `
+    -Actual $verifiedSecretNames `
+    -Expected @($environmentSecrets.Keys) `
+    -Label 'GitHub environment secret names'
 
 $legacyEnvironmentVariableNames = @(
     'AZURE_CLIENT_ID',
@@ -222,17 +515,18 @@ foreach ($variableName in $legacyEnvironmentVariableNames) {
     }
 }
 
-$verifiedCredential = az identity federated-credential show `
-    --name $FederatedCredentialName `
+$verifiedCredentials = @(
+    az identity federated-credential list `
     --identity-name $identityName `
     --resource-group $resourceGroup `
     --output json | ConvertFrom-Json
-if ($verifiedCredential.issuer -ne $issuer -or
-    $verifiedCredential.subject -ne $subject -or
-    @($verifiedCredential.audiences).Count -ne 1 -or
-    $verifiedCredential.audiences[0] -ne $audience) {
-    throw 'Federated credential read-back verification failed.'
-}
+)
+Assert-ExactFederatedCredentialSet `
+    -Credentials $verifiedCredentials `
+    -ExpectedName $FederatedCredentialName `
+    -ExpectedIssuer $issuer `
+    -ExpectedSubject $subject `
+    -ExpectedAudience $audience | Out-Null
 
 $verifiedEnvironment = gh api $environmentUri | ConvertFrom-Json
 $verifiedBranchPolicies = @(
@@ -254,21 +548,10 @@ if ($verifiedEnvironment.deployment_branch_policy.protected_branches -or
     throw 'GitHub environment branch protection is not configured for explicit custom branches.'
 }
 
-$githubState = [ordered]@{
-    allowedBranches = @($allowedBranchSet)
-    environment = $Environment
-    environmentSecretNames = @($environmentSecrets.Keys)
-    federatedCredentialName = $FederatedCredentialName
-    issuer = $issuer
-    immutableSubject = [bool]$oidcCustomization.use_immutable_subject
-    network = $runnerNetwork
-    repository = $Repository
-    subjectPrefix = $subjectPrefix
-    subject = $subject
-    verifiedAt = (Get-Date).ToString('o')
-    workloadClientId = $infrastructure.outputs.workloadClientId.value
-}
-$githubState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $githubStatePath -Encoding utf8NoBOM
+$githubState.environmentSecretNames = @($environmentSecrets.Keys)
+$githubState.status = 'verified'
+$githubState.verifiedAt = (Get-Date).ToString('o')
+Write-GitHubState -State $githubState
 
 Write-Host "GitHub environment '$Environment' is restricted to: $($AllowedBranches -join ', ')"
 Write-Host (

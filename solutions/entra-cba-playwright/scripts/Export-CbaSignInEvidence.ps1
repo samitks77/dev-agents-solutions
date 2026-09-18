@@ -63,7 +63,20 @@ while ($uri) {
     foreach ($entry in @($response.value)) {
         $entries.Add($entry)
     }
-    $uri = $response.'@odata.nextLink'
+    $uri = if ($response -is [Collections.IDictionary]) {
+        if ($response.Contains('@odata.nextLink')) {
+            [string]$response['@odata.nextLink']
+        } else {
+            $null
+        }
+    } else {
+        $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
+        if ($null -ne $nextLinkProperty) {
+            [string]$nextLinkProperty.Value
+        } else {
+            $null
+        }
+    }
 }
 
 if ($entries.Count -eq 0) {

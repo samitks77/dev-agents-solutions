@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory)][string]$VirtualNetworkAddressPrefix,
     [Parameter(Mandatory)][string]$RunnerSubnetAddressPrefix,
     [Parameter(Mandatory)][string]$PrivateEndpointSubnetAddressPrefix,
+    [switch]$ConfirmManagedIdentityServicePrincipals,
     [switch]$WhatIf
 )
 
@@ -19,85 +20,18 @@ $templateFile = Join-Path $labRoot 'infra\main.bicep'
 . (Join-Path $PSScriptRoot 'KeyVault-Rbac.ps1')
 . (Join-Path $PSScriptRoot 'Runner-Network.ps1')
 
-function Assert-LabVaultRbac {
-    param(
-        [Parameter(Mandatory)][object]$Outputs,
-        [switch]$RepairLegacyAssignments
-    )
-
-    $vaultName = $Outputs.runnerVaultName.value
-    $workloadPrincipalId = $Outputs.workloadPrincipalId.value
-    if (-not $vaultName -or -not $workloadPrincipalId) {
-        throw 'Infrastructure outputs do not identify the runner vault and workload principal.'
-    }
-    $vault = az keyvault show `
-        --name $vaultName `
-        --resource-group $ResourceGroup `
-        --output json | ConvertFrom-Json
-
-    # Public Azure built-in Key Vault Secrets Officer role definition ID.
-    $secretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
-    $directOfficerAssignments = @(
-        az role assignment list `
-            --scope $vault.id `
-            --role $secretsOfficerRoleId `
-            --output json | ConvertFrom-Json
-    ) | Where-Object { $_.scope -eq $vault.id }
-    if ($RepairLegacyAssignments) {
-        foreach ($assignment in $directOfficerAssignments) {
-            az role assignment delete --ids $assignment.id --output none
-        }
-        $revocationDeadline = (Get-Date).AddMinutes(2)
-        do {
-            $directOfficerAssignments = @(
-                az role assignment list `
-                    --scope $vault.id `
-                    --role $secretsOfficerRoleId `
-                    --output json | ConvertFrom-Json
-            ) | Where-Object { $_.scope -eq $vault.id }
-            if ($directOfficerAssignments.Count -ne 0) {
-                Start-Sleep -Seconds 5
-            }
-        } while ($directOfficerAssignments.Count -ne 0 -and (Get-Date) -lt $revocationDeadline)
-    }
-    if ($directOfficerAssignments.Count -ne 0) {
-        throw 'The lab vault retains a direct Key Vault Secrets Officer assignment.'
-    }
-
-    $mutationAssignments = @(Get-KeyVaultSecretMutationAssignments `
-        -PrincipalId $workloadPrincipalId `
-        -VaultResourceId $vault.id)
-    if ($mutationAssignments.Count -ne 0) {
-        $roleSummary = $mutationAssignments | ForEach-Object {
-            "'$($_.roleName)' at '$($_.scope)'"
-        }
-        throw "The GitHub workload identity can mutate Key Vault secrets through $($roleSummary -join ', ')."
-    }
-
-    # Public Azure built-in Key Vault Secrets User role definition ID.
-    $secretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
-    $readerAssignments = @(
-        az role assignment list `
-            --assignee $workloadPrincipalId `
-            --scope $vault.id `
-            --only-show-errors `
-            --output json | ConvertFrom-Json
-    ) | Where-Object {
-        $_.scope -eq $vault.id -and
-        $_.roleDefinitionId.EndsWith(
-            "/$secretsUserRoleId",
-            [StringComparison]::OrdinalIgnoreCase
-        )
-    }
-    if ($readerAssignments.Count -ne 1) {
-        throw 'The GitHub workload identity must have exactly one direct Key Vault Secrets User assignment.'
-    }
-}
-
 Assert-LabNetworkPrefixes `
     -VirtualNetworkAddressPrefix $VirtualNetworkAddressPrefix `
     -RunnerSubnetAddressPrefix $RunnerSubnetAddressPrefix `
     -PrivateEndpointSubnetAddressPrefix $PrivateEndpointSubnetAddressPrefix
+
+if (-not $WhatIf -and -not $ConfirmManagedIdentityServicePrincipals) {
+    throw (
+        'Infrastructure deployment creates two user-assigned managed identities and Azure ' +
+        'automatically creates their backing Microsoft Entra service principals. Rerun with ' +
+        '-ConfirmManagedIdentityServicePrincipals to acknowledge this directory side effect.'
+    )
+}
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI is required.'
@@ -132,6 +66,7 @@ if ($WhatIf) {
         --template-file $templateFile `
         --parameters `
             location=$Location `
+            confirmManagedIdentityServicePrincipals=$true `
             virtualNetworkAddressPrefix=$VirtualNetworkAddressPrefix `
             runnerSubnetAddressPrefix=$RunnerSubnetAddressPrefix `
             privateEndpointSubnetAddressPrefix=$PrivateEndpointSubnetAddressPrefix
@@ -141,7 +76,7 @@ if ($WhatIf) {
     $existingStatePath = Join-Path $stateDirectory 'infrastructure.json'
     if (Test-Path -LiteralPath $existingStatePath) {
         $existingState = Get-Content -LiteralPath $existingStatePath -Raw | ConvertFrom-Json
-        Assert-LabVaultRbac -Outputs $existingState.outputs
+        Assert-LabVaultRbac -Outputs $existingState.outputs -ResourceGroup $ResourceGroup
     }
     Write-Host "Infrastructure what-if succeeded in '$ResourceGroup'."
     return
@@ -153,6 +88,7 @@ az deployment group create `
     --template-file $templateFile `
     --parameters `
         location=$Location `
+        confirmManagedIdentityServicePrincipals=$true `
         virtualNetworkAddressPrefix=$VirtualNetworkAddressPrefix `
         runnerSubnetAddressPrefix=$RunnerSubnetAddressPrefix `
         privateEndpointSubnetAddressPrefix=$PrivateEndpointSubnetAddressPrefix `
@@ -164,7 +100,7 @@ $outputs = az deployment group show `
     --query properties.outputs `
     --output json | ConvertFrom-Json
 
-Assert-LabVaultRbac -Outputs $outputs -RepairLegacyAssignments
+Assert-LabVaultRbac -Outputs $outputs -ResourceGroup $ResourceGroup
 
 $state = [ordered]@{
     deploymentName = $deploymentName

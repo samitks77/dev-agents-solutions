@@ -1,0 +1,27 @@
+name: entra-cba-public-proof-verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+run-name: entra-cba-public-proof-verification
+
+jobs:
+  verify-published-proof:
+    name: Verify published privacy-safe 37-check proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the selected revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          clean: true
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify public template and pinned published proof
+        shell: pwsh
+        run: ./solutions/entra-cba-playwright/scripts/Invoke-EntraCbaVerification.ps1 -Tier PublicProof

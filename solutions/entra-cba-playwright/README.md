@@ -13,6 +13,129 @@ requested capability to its implementation and proof gate. Use the
 [internal showcase runbook](docs/internal-showcase.md) to demonstrate the result without relying on
 screenshots or rerunning tenant mutations.
 
+## Deploy infrastructure now
+
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Fsolutions%2Fentra-cba-playwright%2Ftemplates%2Fazuredeploy%2Fentra-cba-playwright-infrastructure.json)
+[![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Fsolutions%2Fentra-cba-playwright%2Ftemplates%2Fazuredeploy%2Fentra-cba-playwright-infrastructure.json)
+
+This button deploys **Azure resource-plane infrastructure only**: the Log Analytics workspace, two
+managed identities, the NAT-gated runner network, the private Key Vault, and the Static Web App
+described by [`infra/portal.bicep`](infra/portal.bicep), which wraps
+[`infra/main.bicep`](infra/main.bicep) and exposes only three predefined, non-overlapping RFC1918
+network profiles. Azure automatically creates a Microsoft Entra service principal behind each
+user-assigned managed identity, so the template requires an explicit acknowledgement before
+deployment. It does not authenticate an operator to Microsoft Graph or GitHub, create users or
+groups, configure CBA or Conditional Access, or enable any access-control policy. See
+[`templates/azuredeploy/README.md`](templates/azuredeploy/README.md) for the parameter and output
+reference, and use `./scripts/Deploy-Infrastructure.ps1` instead if you want the deployment outputs
+captured automatically or need custom RFC1918 prefixes. The button cannot write to your local disk,
+so a separate discovery step is required afterward.
+
+In the Azure portal:
+
+1. select the intended test subscription and resource group;
+2. choose a supported region;
+3. choose the predefined network profile that does not overlap with networks you may later connect;
+4. acknowledge that the two managed identities create backing Entra service principals;
+5. review the infrastructure-only changes, then select **Create**;
+6. wait for a successful deployment before running the bootstrap command below.
+
+### One command to finish setup after the button
+
+The portal button bypasses `Deploy-Infrastructure.ps1`'s automatic capture of deployment outputs
+into `.lab-state`. Apart from the two disclosed managed-identity service principals, it performs no
+PKI, Entra CBA, Conditional Access, Key Vault secret, or GitHub configuration. Run exactly one
+command to safely rediscover the infrastructure and perform every remaining tenant-mutating step,
+in order, with a fail-closed confirmation gate:
+
+```powershell
+./scripts/Bootstrap-PostDeploy.ps1 `
+    -Subscription <subscription-id> `
+    -ExpectedTenantId <tenant-id> `
+    -ResourceGroup <resource-group-name> `
+    -TestUserUpn <dedicated-test-user-upn> `
+    -CertificatePolicyOid <organization-controlled-certificate-policy-oid> `
+    -Repository <github-owner>/<repository-name> `
+    -ConfirmTenantMutations
+```
+
+The command first performs read-only Azure and GitHub discovery. It then prints the resolved tenant
+ID, subscription ID, repository, and specific mutation list before requiring you to type `CONFIRM`
+(not just press Enter). No post-deployment PKI, cloud, tenant, Conditional Access, or GitHub mutation
+occurs before that confirmation.
+See [Post-deployment bootstrap](#post-deployment-bootstrap) below for the full contract, including
+the non-interactive `-ConfirmTenantMutations` + `ENTRA_CBA_BOOTSTRAP_AUTOAPPROVE` double-confirmation
+path.
+
+## Post-deployment bootstrap
+
+`./scripts/Bootstrap-PostDeploy.ps1` is the single command that finishes what the Deploy to Azure
+button intentionally does not do. It stops on the first failure:
+
+1. **Read-only preflight:** `Import-InfrastructureState.ps1` resolves the named or latest matching
+   successful deployment and independently compares all 17 security-relevant outputs with live
+   Azure resources. It reconstructs the app/CRL URLs, verifies both managed-identity client,
+   principal and resource IDs, reuses the exact runner network/private-DNS contract, and runs the
+   same Key Vault RBAC assertion as the script deployment path. Only a stale direct Secrets Officer
+   assignment may pass as repairable drift only when its exact assignment ID, vault and publisher
+   principal are bound in the ignored `publisher-operation.json` journal; unrelated, inherited or
+   unrecorded direct or self-elevatable mutation access fails preflight.
+2. **Explicit consent:** after GitHub ADMIN access and the resolved Azure context are verified, the
+   shared gate prints the exact mutation scope and requires the switch plus typed `CONFIRM`.
+3. **RBAC recovery:** after consent, removes only the exact assignment recorded before a prior
+   publisher operation, then requires both identities to have no standing direct or
+   self-elevatable secret-mutation access. No unrecorded assignment is changed.
+4. **PKI:** creates the disposable PKI or validates that existing ignored state is bound to the same
+   UPN, policy OID and CRL URL and that every required file/hash remains valid. `-RegeneratePki`
+   requires either no dependent Entra state or a completed, tenant-bound teardown record. After
+   validating every recorded state hash, bootstrap retires the old ownership/evidence records and
+   only then creates the replacement PKI.
+5. **Application and CRL:** creates the unique relying-party app, deploys the Static Web App, and
+   verifies the exact published CRL bytes and signature.
+6. **Key Vault:** publishes the current PFX and passphrase on every bootstrap invocation through the
+   temporary private ACI publisher. Stale timestamps never cause publication to be skipped.
+7. **Entra:** obtains one reusable Graph authorization, creates only new disposable user/group/PKI
+   objects or exact objects previously recorded as created by this solution, and configures CBA.
+8. **Conditional Access and GitHub:** creates or verifies the exact solution-owned report-only
+   policy, then configures the selected repository's OIDC federation and encrypted environment
+   secrets.
+
+Bootstrap, FreshRun, and teardown all take the same exclusive local lifecycle lock, so they cannot
+overlap in one checkout. Graph and Azure creation journals use a ten-minute appearance window
+before deciding whether an interrupted create is absent; cleanup then gets a separate bounded
+verification window.
+
+The Entra CBA authentication-method policy is tenant-wide. Use an isolated test tenant whenever
+possible; otherwise use an approved exclusive maintenance window and complete teardown.
+
+### Fail-closed consent gate
+
+After read-only discovery succeeds but before any mutation, the command prints the exact resolved
+tenant ID, subscription ID, GitHub repository, and itemized mutation list, then enforces:
+
+| Situation | Result |
+|---|---|
+| `-ConfirmTenantMutations` not supplied | **Abort.** No default or missing flag is ever treated as consent. |
+| `-ConfirmTenantMutations` supplied, interactive session | You must type the literal word `CONFIRM` at the prompt. Anything else (including a blank Enter) aborts. |
+| `-ConfirmTenantMutations` supplied, non-interactive session, `$env:ENTRA_CBA_BOOTSTRAP_AUTOAPPROVE` not exactly `CONFIRMED` | **Abort.** |
+| `-ConfirmTenantMutations` supplied, non-interactive session, `$env:ENTRA_CBA_BOOTSTRAP_AUTOAPPROVE = 'CONFIRMED'` | Proceeds without an interactive prompt — the intentional, doubly-confirmed unattended path. |
+
+Any ambiguity (a redirected console, an unset or misspelled environment variable, a missing switch)
+always resolves to **abort**. Nothing about this gate can be satisfied silently.
+
+```powershell
+# Interactive (recommended): the switch plus a typed CONFIRM prompt.
+./scripts/Bootstrap-PostDeploy.ps1 -Subscription <sub-id> -ExpectedTenantId <tenant-id> `
+    -ResourceGroup <rg-name> -TestUserUpn <upn> -CertificatePolicyOid <oid> `
+    -Repository <owner>/<repo> -ConfirmTenantMutations
+
+# Intentional non-interactive automation: requires BOTH the switch AND the env var.
+$env:ENTRA_CBA_BOOTSTRAP_AUTOAPPROVE = 'CONFIRMED'
+./scripts/Bootstrap-PostDeploy.ps1 -Subscription <sub-id> -ExpectedTenantId <tenant-id> `
+    -ResourceGroup <rg-name> -TestUserUpn <upn> -CertificatePolicyOid <oid> `
+    -Repository <owner>/<repo> -ConfirmTenantMutations
+```
+
 ## Customer-ready validation package
 
 Download the
@@ -185,10 +308,15 @@ Confirm that the Azure account is in the intended tenant and subscription and th
     -Location $location `
     -VirtualNetworkAddressPrefix $virtualNetworkAddressPrefix `
     -RunnerSubnetAddressPrefix $runnerSubnetAddressPrefix `
-    -PrivateEndpointSubnetAddressPrefix $privateEndpointSubnetAddressPrefix
+    -PrivateEndpointSubnetAddressPrefix $privateEndpointSubnetAddressPrefix `
+    -ConfirmManagedIdentityServicePrincipals
 ```
 
-The deployment creates the Static Web App, VNet, ACI-delegated runner subnet, NAT Gateway and static public IP, Private Endpoint subnet, private DNS zone and VNet link, private Key Vault, and workload identities. The script persists discovered resource IDs and addresses under `.lab-state`, which is Git-ignored.
+The deployment creates the Static Web App, VNet, ACI-delegated runner subnet, NAT Gateway and
+static public IP, Private Endpoint subnet, private DNS zone and VNet link, private Key Vault, and
+workload identities. `-ConfirmManagedIdentityServicePrincipals` explicitly acknowledges that Azure
+also creates the two identities' backing Entra service principals. The script persists discovered
+resource IDs and addresses under `.lab-state`, which is Git-ignored.
 
 Before any runner launch, `Runner-Network.ps1` reads ARM and rejects the topology unless:
 
@@ -274,10 +402,12 @@ and Conditional Access receipt binds to the same tested repository revision.
 The publisher receives secret-write access only during publication and runs an Azure CLI image
 pinned by its MCR manifest SHA-256 digest. The script verifies the deployed ACI image before
 accepting publication. The PFX and passphrase are separate Key Vault secrets. The GitHub workload
-identity receives secret-read access but no secret mutation role. Deployment identifiers are stored
-as encrypted GitHub environment secrets so GitHub masks their exact values in public logs; legacy
-environment variables are removed after migration. No GitHub secret contains the certificate or
-its passphrase.
+identity receives secret-read access but no direct or self-elevatable secret mutation capability.
+That dedicated identity must have exactly one federated credential matching the immutable
+repository/environment subject; configuration and every runner launch reject additional trust
+paths. Deployment identifiers are stored as encrypted GitHub environment secrets so GitHub masks
+their exact values in public logs; legacy environment variables are removed after migration. No
+GitHub secret contains the certificate or its passphrase.
 
 ### Phase 7: run Playwright on the ephemeral Azure runner
 
@@ -359,7 +489,8 @@ authorization window. Recovery-only mode requires at least ten minutes.
 
 The transaction performs these operations in order:
 
-1. takes an exclusive local lock so a second orchestrator cannot overlap;
+1. takes the shared lifecycle lock plus the Conditional Access isolation lock so bootstrap,
+   FreshRun, and teardown cannot overlap in one checkout;
 2. obtains a Graph token and proves its tenant, scopes, and remaining lifetime;
 3. recovers any prior incomplete schema-v3 isolation journal;
 4. reads the three exact policies and verifies their IDs, display name, template ID, enabled state, all-users scope, all-applications scope, all-client-app scope, and MFA grant;
@@ -425,7 +556,10 @@ deployment, run:
 The verifier re-queries GitHub and Azure, re-hashes the bounded CI receipts, validates the
 sanitized positive and negative Entra receipts, checks the restoration journal and confirms that
 no ephemeral compute or repository runner remains. The exact target run, commit, correlations and
-report SHA-256 are recorded here only after that command passes.
+report SHA-256 are recorded here only after that command passes. This is exactly Tier B of the
+[three-tier verification model](#three-tier-verification-model) below; prefer invoking it as
+`.\scripts\Invoke-EntraCbaVerification.ps1 -Tier EvidenceReplay` so the tier is explicit in your
+terminal history.
 
 The propagation experiment from the implementation phase remains operationally significant. A
 two-minute wait produced a browser rejection while unrelated global policies were still causal.
@@ -446,6 +580,50 @@ After every proof, independently verify:
 Raw Playwright traces and videos are disabled. Runtime state, credentials, and receipts are
 Git-ignored. Scripts discover addresses and resource IDs from ARM and do not trust documentation
 as configuration.
+
+## Three-tier verification model
+
+`./scripts/Invoke-EntraCbaVerification.ps1 -Tier <PublicProof|EvidenceReplay|FreshRun>` is the
+single unified entry point for verification. It never implies that one tier is equivalent to
+another: each tier prints a visually distinct banner and a distinct pass/fail marker. The
+[GitHub Actions workflow](../../.github/workflows/entra-cba-verification.yml) exposes only the safe
+public-proof tier.
+
+| Tier | Script invocation | What it checks | Tenant mutation | Banner |
+|---|---|---|---|---|
+| **A — Public proof** | `-Tier PublicProof` | Repository hygiene, the exact portal ARM output contract, the published PDF hash, and the downloaded public proof's pinned SHA-256, 37/0 result, cleanup, restoration and privacy fields. | **None.** Anonymous HTTPS download only; no authentication or tenant access. This verifies published evidence, not a new sign-in. | `PUBLIC_PROOF_PASS` |
+| **B — Read-only evidence replay** | `-Tier EvidenceReplay` | Runs `Show-E2eProof.ps1` against retained receipts and live read-only Azure/GitHub state, then fails unless `overallResult` is `PASS` with exactly 37 passed, 0 failed and 37 check records. | **None.** Live Azure/GitHub reads only. | `EVIDENCE_REPLAY_PASS` |
+| **C — Fresh end-to-end proof** | See the command below. | Creates one new cloud/browser proof set, regenerates headed, wrong-origin, five-run reliability and session-reuse controls, performs correlated MFA/SFA Conditional Access proof, restores every policy, then requires exactly 37/37. | **Yes.** Ephemeral Azure/GitHub activity plus a bounded Conditional Access transaction. Requires both general typed consent and the exclusive-window switch. | `FRESH_RUN_PASS` |
+
+Checking Tier A's static artifact is never a substitute for Tier B, and replaying Tier B's retained
+evidence is never a substitute for a fresh Tier C run — the wrapper's banners, the underlying
+scripts' own output, and the workflow scope all say so explicitly.
+
+Run a fresh proof locally from the clean, cloud-tested commit:
+
+```powershell
+$policyIds = @(
+    '<reviewed-managed-policy-id-1>',
+    '<reviewed-managed-policy-id-2>',
+    '<reviewed-managed-policy-id-3>'
+) -join ','
+
+./scripts/Invoke-EntraCbaVerification.ps1 `
+    -Tier FreshRun `
+    -Repository <github-owner>/<repository-name> `
+    -Ref main `
+    -InterferingPolicyIdsCsv $policyIds `
+    -ConfirmTenantMutations `
+    -ConfirmExclusiveConditionalAccessWindow `
+    -PropagationSeconds 900 `
+    -NegativeFinalizationSeconds 120 `
+    -EvidenceTimeoutMinutes 30
+```
+
+The [verification workflow](../../.github/workflows/entra-cba-verification.yml) intentionally exposes
+only the safe Tier A button in the Actions tab. Tier B needs retained ignored local evidence, and
+Tier C needs an authenticated operator, a headed desktop, reviewed policy IDs, and explicit consent;
+both therefore run only through the local unified command.
 
 ## CRL renewal
 
