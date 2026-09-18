@@ -34,6 +34,8 @@ catch [IO.IOException] {
 }
 try {
 . (Join-Path $PSScriptRoot 'EntraCba-Policy.ps1')
+. (Join-Path $PSScriptRoot 'Entra-Operation.ps1')
+. (Join-Path $PSScriptRoot 'Graph-Reconciliation.ps1')
 
 function Write-EntraStateAtomically {
     param(
@@ -144,52 +146,6 @@ if (-not $context -or $context.TenantId -ne $TenantId -or $missingScopes.Count -
 }
 if (-not $context -or $context.TenantId -ne $TenantId -or $missingScopes.Count -ne 0) {
     throw "Microsoft Graph authorization for '$($requiredScopes -join ', ')' in tenant '$TenantId' is required."
-}
-
-function Get-GraphCollectionResponse {
-    param([Parameter(Mandatory)][string]$Uri)
-
-    $firstResponse = $null
-    $items = [Collections.Generic.List[object]]::new()
-    while ($Uri) {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $Uri
-        if (-not $firstResponse) {
-            $firstResponse = $response
-        }
-        foreach ($item in @($response.value)) {
-            $items.Add($item)
-        }
-        $Uri = if ($response -is [Collections.IDictionary]) {
-            if ($response.Contains('@odata.nextLink')) {
-                [string]$response['@odata.nextLink']
-            } else {
-                $null
-            }
-        } else {
-            $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-            if ($null -ne $nextLinkProperty) {
-                [string]$nextLinkProperty.Value
-            } else {
-                $null
-            }
-        }
-    }
-    if (-not $firstResponse) {
-        throw 'Microsoft Graph returned no collection response.'
-    }
-    $firstResponse.value = $items.ToArray()
-    if ($firstResponse -is [Collections.IDictionary]) {
-        $firstResponse.Remove('@odata.nextLink')
-    } else {
-        $firstResponse.PSObject.Properties.Remove('@odata.nextLink')
-    }
-    return $firstResponse
-}
-
-function Get-GraphCollection {
-    param([Parameter(Mandatory)][string]$Uri)
-
-    return @((Get-GraphCollectionResponse -Uri $Uri).value)
 }
 
 $policyUri = 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/x509Certificate'
@@ -306,7 +262,7 @@ if ($existingState) {
 }
 if ($entraOperation) {
     $operationId = [guid]::Empty
-    if (
+    $operationMatchesRequestedContract = -not (
         [int]$entraOperation.schemaVersion -ne 1 -or
         $entraOperation.status -cne 'provisioning' -or
         -not [guid]::TryParseExact(
@@ -323,7 +279,21 @@ if ($entraOperation) {
         $entraOperation.requestedPkiDisplayName -cne $PkiDisplayName -or
         $entraOperation.pkiObjectDisplayName -cne
             "$PkiDisplayName [$($operationId.ToString('N'))]"
+    )
+    if (
+        -not $operationMatchesRequestedContract -and
+        (Test-EntraOperationHasNoMutationAttempt `
+            -Operation $entraOperation `
+            -TenantId $TenantId)
     ) {
+        Remove-Item -LiteralPath $entraOperationStatePath -Force
+        $entraOperation = $null
+        Write-Host (
+            'Retired an all-pending Entra provisioning journal because no remote mutation ' +
+            'had been attempted.'
+        )
+    }
+    elseif (-not $operationMatchesRequestedContract) {
         throw 'Entra provisioning journal does not match the exact requested ownership contract.'
     }
 }
@@ -519,31 +489,6 @@ else {
     ) {
         throw 'Recorded Entra state belongs to a different requested PKI display name.'
     }
-}
-
-function Get-ReconciledGraphMatches {
-    param(
-        [Parameter(Mandatory)][scriptblock]$Lookup,
-        [switch]$WaitForAppearance
-    )
-
-    $appearanceDeadline = (Get-Date).AddMinutes(10)
-    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
-    $consecutiveAbsenceChecks = 0
-    do {
-        $matches = @(& $Lookup)
-        if ($matches.Count -ne 0 -or -not $WaitForAppearance) {
-            return $matches
-        }
-        if ((Get-Date) -ge $appearanceDeadline) {
-            $consecutiveAbsenceChecks++
-            if ($consecutiveAbsenceChecks -ge 3) {
-                return @()
-            }
-        }
-        Start-Sleep -Seconds 10
-    } while ((Get-Date) -lt $absenceDeadline)
-    throw 'Microsoft Graph object absence could not be proven after the appearance window.'
 }
 
 $escapedGroupName = [Uri]::EscapeDataString("displayName eq '$($GroupDisplayName.Replace("'", "''"))'")
