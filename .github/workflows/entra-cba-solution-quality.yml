@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - ".github/workflows/entra-cba-solution-quality.yml"
+      - ".github/workflows/entra-cba-verification.yml"
       - ".github/workflows/entra-cba-playwright-poc.yml"
       - "solutions/entra-cba-playwright/**"
   pull_request:
     paths:
       - ".github/workflows/entra-cba-solution-quality.yml"
+      - ".github/workflows/entra-cba-verification.yml"
       - ".github/workflows/entra-cba-playwright-poc.yml"
       - "solutions/entra-cba-playwright/**"
 
@@ -74,8 +76,29 @@ jobs:
         shell: pwsh
         run: ./solutions/entra-cba-playwright/scripts/Test-PublicTemplate.ps1
 
-      - name: Compile the Bicep deployment
+      - name: Test deployment experience guardrails
+        shell: pwsh
+        run: ./solutions/entra-cba-playwright/scripts/Test-DeploymentExperience.ps1
+
+      - name: Install the pinned Bicep compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          az bicep install --version v0.41.2
+          az bicep version | grep -F "0.41.2"
+
+      - name: Compile the portal-safe Bicep deployment
         run: >
           az bicep build
-          --file solutions/entra-cba-playwright/infra/main.bicep
-          --outfile "${RUNNER_TEMP}/entra-cba-main.json"
+          --file solutions/entra-cba-playwright/infra/portal.bicep
+          --outfile "${RUNNER_TEMP}/entra-cba-portal.json"
+
+      - name: Confirm the checked-in Deploy-to-Azure template matches the Bicep source
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_in="solutions/entra-cba-playwright/templates/azuredeploy/entra-cba-playwright-infrastructure.json"
+          if ! diff -u "${RUNNER_TEMP}/entra-cba-portal.json" "$checked_in"; then
+            echo "::error file=${checked_in}::The checked-in ARM template has drifted from infra/portal.bicep. Regenerate it with pinned Bicep v0.41.2 and commit the result."
+            exit 1
+          fi

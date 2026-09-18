@@ -22,10 +22,13 @@ $entraStatePath = Join-Path $stateDirectory 'entra.json'
 $githubStatePath = Join-Path $stateDirectory 'github.json'
 $infrastructureStatePath = Join-Path $stateDirectory 'infrastructure.json'
 $runnerStatePath = Join-Path $stateDirectory 'runner.json'
+$runnerOperationStatePath = Join-Path $stateDirectory 'runner-operation.json'
+$runnerOperationLockPath = Join-Path $stateDirectory 'runner-operation.lock'
 $ciEvidenceRoot = Join-Path $labRoot '.artifacts\ci'
 . (Join-Path $PSScriptRoot 'Runner-Network.ps1')
 . (Join-Path $PSScriptRoot 'Proof-Set.ps1')
 . (Join-Path $PSScriptRoot 'Workflow-Privacy.ps1')
+. (Join-Path $PSScriptRoot 'Federated-Credential.ps1')
 
 foreach ($requiredPath in @(
     $applicationStatePath,
@@ -54,6 +57,13 @@ $infrastructure = Get-Content -LiteralPath $infrastructureStatePath -Raw | Conve
 if ($github.repository -cne $Repository) {
     throw "GitHub state belongs to '$($github.repository)', not '$Repository'."
 }
+if (
+    $github.status -cne 'verified' -or
+    $github.environmentCreated -ne $true -or
+    $github.federatedCredentialCreated -ne $true
+) {
+    throw 'GitHub OIDC and environment state is not fully verified.'
+}
 if ($application.tenantId -ne $infrastructure.tenantId -or
     $entra.tenantId -ne $infrastructure.tenantId -or
     $application.testUsername -cne $entra.testUserUpn) {
@@ -71,6 +81,18 @@ if ($azureAccount.id -ne $infrastructure.subscriptionId -or
     $azureAccount.tenantId -ne $infrastructure.tenantId) {
     throw 'Azure CLI context does not match the stored subscription and tenant.'
 }
+$liveFederatedCredentials = @(
+    az identity federated-credential list `
+        --identity-name $infrastructure.outputs.workloadIdentityName.value `
+        --resource-group $infrastructure.resourceGroup `
+        --output json | ConvertFrom-Json
+)
+Assert-ExactFederatedCredentialSet `
+    -Credentials $liveFederatedCredentials `
+    -ExpectedName $github.federatedCredentialName `
+    -ExpectedIssuer $github.issuer `
+    -ExpectedSubject $github.subject `
+    -ExpectedAudience 'api://AzureADTokenExchange' | Out-Null
 $runnerNetwork = Get-RunnerNetworkContract -Infrastructure $infrastructure
 if (-not $github.network -or
     $github.network.runnerSubnetId -ne $runnerNetwork.runnerSubnetId -or
@@ -86,6 +108,19 @@ $workflowLogProtectedValues = Get-WorkflowLogProtectedValues `
     -Infrastructure $infrastructure `
     -RunnerNetwork $runnerNetwork
 
+try {
+    $runnerOperationLock = [IO.File]::Open(
+        $runnerOperationLockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+}
+catch [IO.IOException] {
+    throw 'Another ephemeral-runner operation owns the exclusive local lock.'
+}
+try {
+
 $repo = gh repo view $Repository --json nameWithOwner,viewerPermission,url | ConvertFrom-Json
 if ($repo.nameWithOwner -cne $Repository -or $repo.viewerPermission -ne 'ADMIN') {
     throw "GitHub ADMIN permission for '$Repository' is required."
@@ -96,37 +131,96 @@ if (-not $runnerSubnetId) {
     throw 'Infrastructure state does not contain a runner subnet.'
 }
 
-function Test-AciContainerGroupExists {
-    param([Parameter(Mandatory)][string]$Name)
+function Write-RunnerStateAtomically {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Collections.IDictionary]$State
+    )
 
-    $matchingName = az container list `
-        --resource-group $infrastructure.resourceGroup `
-        --query "[?name=='$Name'].name | [0]" `
-        --output tsv
-    return [bool]$matchingName
+    $writeId = "$PID.$([guid]::NewGuid().ToString('N'))"
+    $temporaryPath = "$Path.$writeId.tmp"
+    $backupPath = "$Path.$writeId.bak"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($State | ConvertTo-Json -Depth 10),
+            [Text.UTF8Encoding]::new($false)
+        )
+        if (Test-Path -LiteralPath $Path) {
+            [IO.File]::Replace($temporaryPath, $Path, $backupPath, $true)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $Path)
+        }
+    }
+    finally {
+        foreach ($cleanupPath in @($temporaryPath, $backupPath)) {
+            if (Test-Path -LiteralPath $cleanupPath) {
+                Remove-Item -LiteralPath $cleanupPath -Force
+            }
+        }
+    }
 }
 
 function Remove-AciContainerGroup {
-    param([Parameter(Mandatory)][string]$Name)
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$LauncherId,
+        [Parameter(Mandatory)][string]$RepositoryId,
+        [Parameter(Mandatory)][string]$ExpiresAtUtc,
+        [switch]$RequireAppearanceWindow
+    )
 
-    $deletionDeadline = (Get-Date).AddMinutes(5)
+    $appearanceDeadline = (Get-Date).AddMinutes(10)
+    $cleanupDeadline = $appearanceDeadline.AddMinutes(2)
+    $containerObserved = $false
     $consecutiveAbsenceChecks = 0
     do {
-        if (Test-AciContainerGroupExists -Name $Name) {
+        $matchingContainers = @(
+            @(
+                az container list `
+                    --resource-group $infrastructure.resourceGroup `
+                    --output json | ConvertFrom-Json
+            ) | Where-Object {
+                $_.name -ceq $Name
+            }
+        )
+        if ($matchingContainers.Count -gt 1) {
+            throw "Azure returned duplicate ACI runner name '$Name'."
+        }
+        if ($matchingContainers.Count -eq 1) {
+            $container = $matchingContainers[0]
+            if (
+                $container.tags.component -cne 'github-runner' -or
+                $container.tags.managedBy -cne 'script' -or
+                $container.tags.workload -cne 'entra-cba-playwright' -or
+                $container.tags.launcherId -cne $LauncherId -or
+                $container.tags.operationId -cne $LauncherId -or
+                $container.tags.expiresAtUtc -cne $ExpiresAtUtc -or
+                [string]$container.tags.repositoryId -cne $RepositoryId
+            ) {
+                throw "ACI runner '$Name' is not owned by launcher '$LauncherId'."
+            }
+            $containerObserved = $true
             $consecutiveAbsenceChecks = 0
             az container delete `
                 --name $Name `
                 --resource-group $infrastructure.resourceGroup `
                 --yes `
                 --output none
-        } else {
+        }
+        elseif (
+            $containerObserved -or
+            -not $RequireAppearanceWindow -or
+            (Get-Date) -ge $appearanceDeadline
+        ) {
             $consecutiveAbsenceChecks++
             if ($consecutiveAbsenceChecks -ge 3) {
                 return
             }
         }
         Start-Sleep -Seconds 5
-    } while ((Get-Date) -lt $deletionDeadline)
+    } while ((Get-Date) -lt $cleanupDeadline)
 
     throw "ACI container group '$Name' was not verifiably absent after deletion."
 }
@@ -138,6 +232,63 @@ function Get-RepositoryRunners {
         "repos/$Repository/actions/runners?per_page=100" `
         --jq '.runners[]' | ConvertFrom-Json
     )
+}
+
+function Remove-ExactRepositoryRunner {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Label,
+        [AllowNull()][string]$RunnerId,
+        [switch]$RequireAppearanceWindow
+    )
+
+    $appearanceDeadline = (Get-Date).AddSeconds(30)
+    $cleanupDeadline = $appearanceDeadline.AddMinutes(2)
+    $runnerObserved = [bool]$RunnerId
+    $consecutiveAbsenceChecks = 0
+    do {
+        $matchingRunners = @(Get-RepositoryRunners | Where-Object {
+            $_.name -ceq $Name
+        })
+        if ($matchingRunners.Count -gt 1) {
+            throw "More than one GitHub runner is named '$Name'."
+        }
+        if ($matchingRunners.Count -eq 1) {
+            $runner = $matchingRunners[0]
+            $runnerLabels = @($runner.labels | ForEach-Object { $_.name })
+            if (
+                ($RunnerId -and [string]$runner.id -cne $RunnerId) -or
+                $runnerLabels.Count -ne 1 -or
+                $runnerLabels[0] -cne $Label
+            ) {
+                throw "GitHub runner '$Name' does not match the exact journaled identity."
+            }
+            if ($runner.status -ne 'offline' -or $runner.busy) {
+                $consecutiveAbsenceChecks = 0
+                Start-Sleep -Seconds 5
+                continue
+            }
+            $runnerObserved = $true
+            $consecutiveAbsenceChecks = 0
+            gh api `
+                --method DELETE `
+                "repos/$Repository/actions/runners/$($runner.id)" `
+                --silent
+        }
+        elseif (
+            $runnerObserved -or
+            -not $RequireAppearanceWindow -or
+            (Get-Date) -ge $appearanceDeadline
+        ) {
+            $consecutiveAbsenceChecks++
+            if ($consecutiveAbsenceChecks -ge 3) {
+                return
+            }
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $cleanupDeadline)
+
+    throw "GitHub runner '$Name' was not verifiably deregistered."
 }
 
 function Assert-ExactProperties {
@@ -155,42 +306,124 @@ function Assert-ExactProperties {
     }
 }
 
-$existingRunners = @(Get-RepositoryRunners)
-foreach ($existingRunner in $existingRunners | Where-Object { $_.name -like 'aci-entra-cba-*' }) {
-    if ($existingRunner.status -ne 'offline' -or $existingRunner.busy) {
-        throw "A prior lab runner '$($existingRunner.name)' is still active."
-    }
-    gh api `
-        --method DELETE `
-        "repos/$Repository/actions/runners/$($existingRunner.id)" `
-        --silent
-}
-
+$existingRunners = @(Get-RepositoryRunners | Where-Object {
+    $_.name -like 'aci-entra-cba-*'
+})
 $existingContainers = @(
-    az container list `
-        --resource-group $infrastructure.resourceGroup `
-        --output json | ConvertFrom-Json
-) | Where-Object {
-    $_.tags.workload -eq 'entra-cba-playwright' -and
-    $_.tags.component -eq 'github-runner'
-}
-foreach ($existingContainer in $existingContainers) {
-    $details = az container show `
-        --name $existingContainer.name `
-        --resource-group $infrastructure.resourceGroup `
-        --output json | ConvertFrom-Json
-    $currentState = $details.containers[0].instanceView.currentState.state
-    $expiresAt = [DateTimeOffset]::MinValue
-    $hasValidExpiry = [DateTimeOffset]::TryParse(
-        [string]$details.tags.expiresAtUtc,
-        [ref]$expiresAt
-    )
-    if ($currentState -notin @('Terminated', 'Failed') -and
-        $hasValidExpiry -and
-        $expiresAt -gt [DateTimeOffset]::UtcNow) {
-        throw "A prior lab runner container '$($existingContainer.name)' is still active."
+    @(
+        az container list `
+            --resource-group $infrastructure.resourceGroup `
+            --output json | ConvertFrom-Json
+    ) | Where-Object {
+        $_.tags.workload -eq 'entra-cba-playwright' -and
+        $_.tags.component -eq 'github-runner'
     }
-    Remove-AciContainerGroup -Name $existingContainer.name
+)
+$existingRunnerOperation = if (
+    Test-Path -LiteralPath $runnerOperationStatePath -PathType Leaf
+) {
+    Get-Content -LiteralPath $runnerOperationStatePath -Raw |
+        ConvertFrom-Json -AsHashtable
+}
+else {
+    $null
+}
+if (-not $existingRunnerOperation) {
+    if ($existingRunners.Count -ne 0 -or $existingContainers.Count -ne 0) {
+        throw (
+            'An ACI runner or GitHub runner exists without exact local ownership state. ' +
+            'No cloud resource was deleted.'
+        )
+    }
+}
+else {
+    $expectedRunnerNameSuffix = if (
+        ([string]$existingRunnerOperation.launcherId).Length -gt 16
+    ) {
+        ([string]$existingRunnerOperation.launcherId).Substring(0, 8)
+    }
+    else {
+        [string]$existingRunnerOperation.launcherId
+    }
+    $expectedRunnerName = "aci-entra-cba-$expectedRunnerNameSuffix"
+    $recordedExpiry = [DateTimeOffset]::MinValue
+    if (
+        [int]$existingRunnerOperation.schemaVersion -ne 1 -or
+        $existingRunnerOperation.status -notin @('planned', 'created', 'registered') -or
+        $existingRunnerOperation.repository -cne $Repository -or
+        [string]$existingRunnerOperation.repositoryId -cne
+            [string]$github.repositoryId -or
+        $existingRunnerOperation.subscriptionId -ine $infrastructure.subscriptionId -or
+        $existingRunnerOperation.resourceGroup -cne $infrastructure.resourceGroup -or
+        $existingRunnerOperation.containerName -cne $expectedRunnerName -or
+        $existingRunnerOperation.runnerName -cne $expectedRunnerName -or
+        -not $existingRunnerOperation.runnerLabel -or
+        -not $existingRunnerOperation.launcherId -or
+        -not [DateTimeOffset]::TryParse(
+            [string]$existingRunnerOperation.expiresAtUtc,
+            [ref]$recordedExpiry
+        ) -or
+        (
+            $existingRunnerOperation.status -ceq 'registered' -and
+            -not $existingRunnerOperation.runnerId
+        )
+    ) {
+        throw 'Ephemeral-runner operation state does not match the exact lab contract.'
+    }
+    $unexpectedContainers = @($existingContainers | Where-Object {
+        $_.name -cne $existingRunnerOperation.containerName
+    })
+    $unexpectedRunners = @($existingRunners | Where-Object {
+        $_.name -cne $existingRunnerOperation.runnerName
+    })
+    if ($unexpectedContainers.Count -ne 0 -or $unexpectedRunners.Count -ne 0) {
+        throw 'Unjournaled ACI or GitHub runner resources exist and were not deleted.'
+    }
+    $recordedContainer = @($existingContainers | Where-Object {
+        $_.name -ceq $existingRunnerOperation.containerName
+    })
+    if ($recordedContainer.Count -eq 1) {
+        $details = az container show `
+            --name $existingRunnerOperation.containerName `
+            --resource-group $infrastructure.resourceGroup `
+            --output json | ConvertFrom-Json
+        $currentState = $null
+        if (
+            @($details.containers).Count -eq 1 -and
+            $null -ne $details.containers[0].instanceView -and
+            $null -ne $details.containers[0].instanceView.currentState
+        ) {
+            $currentState = [string]$details.containers[0].instanceView.currentState.state
+        }
+        $expiresAt = [DateTimeOffset]::MinValue
+        $hasValidExpiry = [DateTimeOffset]::TryParse(
+            [string]$details.tags.expiresAtUtc,
+            [ref]$expiresAt
+        )
+        if (
+            $currentState -notin @('Terminated', 'Failed') -and
+            (
+                -not $hasValidExpiry -or
+                $expiresAt -gt [DateTimeOffset]::UtcNow
+            )
+        ) {
+            throw "Journaled ACI runner '$($details.name)' is still active."
+        }
+    }
+    Remove-AciContainerGroup `
+        -Name $existingRunnerOperation.containerName `
+        -LauncherId ([string]$existingRunnerOperation.launcherId) `
+        -RepositoryId ([string]$existingRunnerOperation.repositoryId) `
+        -ExpiresAtUtc ([string]$existingRunnerOperation.expiresAtUtc) `
+        -RequireAppearanceWindow:(
+            $existingRunnerOperation.status -ceq 'planned'
+        )
+    Remove-ExactRepositoryRunner `
+        -Name $existingRunnerOperation.runnerName `
+        -Label $existingRunnerOperation.runnerLabel `
+        -RunnerId ([string]$existingRunnerOperation.runnerId) `
+        -RequireAppearanceWindow:(-not $existingRunnerOperation.runnerId)
+    Remove-Item -LiteralPath $runnerOperationStatePath -Force
 }
 
 $localHeadSha = (& git -C $labRoot rev-parse HEAD).Trim()
@@ -238,6 +471,9 @@ $runnerNameSuffix = if ($verificationId.Length -gt 16) {
 }
 $runnerName = "aci-entra-cba-$runnerNameSuffix"
 $containerName = $runnerName
+$runnerExpiresAtUtc = [DateTimeOffset]::UtcNow.AddMinutes(
+    $RegistrationTimeoutMinutes + $TimeoutMinutes + 10
+).ToString('o')
 $runnerAssetUrl = (
     "https://github.com/actions/runner/releases/download/v$RunnerVersion/" +
     "actions-runner-linux-x64-$RunnerVersion.tar.gz"
@@ -323,11 +559,11 @@ $containerBody = @{
     tags = @{
         component = 'github-runner'
         environment = 'poc'
-        expiresAtUtc = [DateTimeOffset]::UtcNow.AddMinutes(
-            $RegistrationTimeoutMinutes + $TimeoutMinutes + 10
-        ).ToString('o')
+        expiresAtUtc = $runnerExpiresAtUtc
         launcherId = $verificationId
         managedBy = 'script'
+        operationId = $verificationId
+        repositoryId = [string]$github.repositoryId
         workload = 'entra-cba-playwright'
     }
 }
@@ -349,6 +585,27 @@ $containerUri = (
 $evidenceArtifactId = $null
 $expectedArtifactName = $null
 $workflowLogPrivacy = $null
+$state = $null
+$runnerOperation = [ordered]@{
+    containerName = $containerName
+    expiresAtUtc = $runnerExpiresAtUtc
+    launcherId = $verificationId
+    ref = $Ref
+    repository = $Repository
+    repositoryId = [string]$github.repositoryId
+    resourceGroup = $infrastructure.resourceGroup
+    runnerId = $null
+    runnerImage = $RunnerImage
+    runnerLabel = $runnerLabel
+    runnerName = $runnerName
+    schemaVersion = 1
+    status = 'planned'
+    subscriptionId = $infrastructure.subscriptionId
+    workflowFile = $WorkflowFile
+}
+Write-RunnerStateAtomically `
+    -Path $runnerOperationStatePath `
+    -State $runnerOperation
 try {
     Invoke-RestMethod `
         -Method Put `
@@ -356,6 +613,10 @@ try {
         -Headers $managementHeaders `
         -ContentType 'application/json' `
         -Body ($containerBody | ConvertTo-Json -Depth 20) | Out-Null
+    $runnerOperation.status = 'created'
+    Write-RunnerStateAtomically `
+        -Path $runnerOperationStatePath `
+        -State $runnerOperation
     $registrationToken = $null
     $containerBody = $null
 
@@ -372,7 +633,7 @@ try {
         verificationId = $verificationId
         workflowFile = $WorkflowFile
     }
-    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runnerStatePath -Encoding utf8NoBOM
+    Write-RunnerStateAtomically -Path $runnerStatePath -State $state
 
     $registrationDeadline = (Get-Date).AddMinutes($RegistrationTimeoutMinutes)
     $registeredRunner = $null
@@ -403,6 +664,11 @@ try {
             "'$($container.provisioningState)'. Logs: $logs"
         )
     }
+    $runnerOperation.runnerId = [string]$registeredRunner[0].id
+    $runnerOperation.status = 'registered'
+    Write-RunnerStateAtomically `
+        -Path $runnerOperationStatePath `
+        -State $runnerOperation
 
     $runnerContainerGroup = az container show `
         --name $containerName `
@@ -482,17 +748,39 @@ try {
             --name $containerName `
             --resource-group $infrastructure.resourceGroup `
             --output json | ConvertFrom-Json
-        $currentState = $container.containers[0].instanceView.currentState
+        $currentState = $null
+        if (
+            @($container.containers).Count -eq 1 -and
+            $null -ne $container.containers[0].instanceView
+        ) {
+            $currentState = $container.containers[0].instanceView.currentState
+        }
+        $currentStateName = if ($null -ne $currentState) {
+            [string]$currentState.state
+        } else {
+            ''
+        }
     } while (
-        ($workflowRun.status -ne 'completed' -or $currentState.state -notin @('Terminated', 'Failed')) -and
+        (
+            $workflowRun.status -ne 'completed' -or
+            $currentStateName -notin @('Terminated', 'Failed')
+        ) -and
         (Get-Date) -lt $completionDeadline
     )
 
-    if ($workflowRun.status -ne 'completed' -or $currentState.state -notin @('Terminated', 'Failed')) {
+    if (
+        $workflowRun.status -ne 'completed' -or
+        $currentStateName -notin @('Terminated', 'Failed')
+    ) {
         throw "Workflow or runner exceeded the $TimeoutMinutes-minute lifetime limit."
     }
-    if ($currentState.exitCode -ne 0) {
-        throw "Runner container exited with code '$($currentState.exitCode)'."
+    $exitCode = if ($null -ne $currentState) {
+        $currentState.exitCode
+    } else {
+        $null
+    }
+    if ($null -eq $exitCode -or $exitCode -ne 0) {
+        throw "Runner container exited with code '$exitCode'."
     }
     if ($workflowRun.display_title -cne $expectedRunTitle -or
         $workflowRun.event -ne $expectedWorkflowEvent -or
@@ -526,8 +814,13 @@ try {
     $expectedArtifactName = "entra-cba-playwright-$($workflowRun.id)"
     do {
         $artifacts = @(
-            (gh api "repos/$Repository/actions/runs/$($workflowRun.id)/artifacts" | ConvertFrom-Json).artifacts
-        ) | Where-Object { $_.name -ceq $expectedArtifactName }
+            @(
+                (
+                    gh api "repos/$Repository/actions/runs/$($workflowRun.id)/artifacts" |
+                        ConvertFrom-Json
+                ).artifacts
+            ) | Where-Object { $_.name -ceq $expectedArtifactName }
+        )
         if ($artifacts.Count -eq 0) {
             Start-Sleep -Seconds 5
         }
@@ -833,35 +1126,25 @@ try {
         $cleanupErrors.Add("Unverified workflow run deletion failed: $($_.Exception.Message)")
     }
     try {
-        Remove-AciContainerGroup -Name $containerName
+        Remove-AciContainerGroup `
+            -Name $containerName `
+            -LauncherId $verificationId `
+            -RepositoryId ([string]$github.repositoryId) `
+            -ExpiresAtUtc $runnerExpiresAtUtc `
+            -RequireAppearanceWindow:(
+                $runnerOperation.status -ceq 'planned'
+            )
     } catch {
         $cleanupErrors.Add("ACI deletion failed: $($_.Exception.Message)")
     }
     try {
-        $runnerCleanupDeadline = (Get-Date).AddMinutes(2)
-        $consecutiveRunnerAbsenceChecks = 0
-        do {
-            $runners = @(Get-RepositoryRunners)
-            $matchingRunners = @($runners | Where-Object { $_.name -eq $runnerName })
-            foreach ($runner in $matchingRunners) {
-                gh api `
-                    --method DELETE `
-                    "repos/$Repository/actions/runners/$($runner.id)" `
-                    --silent
-            }
-            if ($matchingRunners.Count -eq 0) {
-                $consecutiveRunnerAbsenceChecks++
-                if ($consecutiveRunnerAbsenceChecks -ge 3) {
-                    break
-                }
-            } else {
-                $consecutiveRunnerAbsenceChecks = 0
-            }
-            Start-Sleep -Seconds 5
-        } while ((Get-Date) -lt $runnerCleanupDeadline)
-        if ($consecutiveRunnerAbsenceChecks -lt 3) {
-            throw "GitHub runner '$runnerName' was not verifiably deregistered."
-        }
+        Remove-ExactRepositoryRunner `
+            -Name $runnerName `
+            -Label $runnerLabel `
+            -RunnerId ([string]$runnerOperation.runnerId) `
+            -RequireAppearanceWindow:(
+                -not $runnerOperation.runnerId
+            )
     } catch {
         $cleanupErrors.Add("GitHub runner deregistration failed: $($_.Exception.Message)")
     }
@@ -875,12 +1158,27 @@ try {
         $state.cleanupVerifiedAt = (Get-Date).ToString('o')
         $state.evidenceArtifactDeleted = $true
         $state.githubRunnerDeregistered = $true
-        $state.workflowFinalConclusion = $cleanupWorkflowRun.conclusion
-        $state.workflowFinalStatus = $cleanupWorkflowRun.status
-        $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $runnerStatePath -Encoding utf8NoBOM
+        $state.workflowFinalConclusion = if ($cleanupWorkflowRun) {
+            $cleanupWorkflowRun.conclusion
+        }
+        else {
+            $null
+        }
+        $state.workflowFinalStatus = if ($cleanupWorkflowRun) {
+            $cleanupWorkflowRun.status
+        }
+        else {
+            $null
+        }
+        Write-RunnerStateAtomically -Path $runnerStatePath -State $state
     }
+    Remove-Item -LiteralPath $runnerOperationStatePath -Force
 }
 
 Write-Host (
     'END_TO_END_VERIFIED conclusion=success privacy=verified cleanup=verified'
 )
+}
+finally {
+    $runnerOperationLock.Dispose()
+}

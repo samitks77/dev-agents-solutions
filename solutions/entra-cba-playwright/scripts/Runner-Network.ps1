@@ -159,16 +159,34 @@ function Get-RunnerNetworkContract {
         @($runnerSubnet.addressPrefix) + @($runnerSubnet.addressPrefixes) |
             Where-Object { $_ }
     )
+    $runnerNatGatewayId = if (
+        $runnerSubnet.PSObject.Properties.Name -contains 'natGateway' -and
+        $runnerSubnet.natGateway
+    ) {
+        [string]$runnerSubnet.natGateway.id
+    }
+    else {
+        $null
+    }
+    $runnerRouteTableId = if (
+        $runnerSubnet.PSObject.Properties.Name -contains 'routeTable' -and
+        $runnerSubnet.routeTable
+    ) {
+        [string]$runnerSubnet.routeTable.id
+    }
+    else {
+        $null
+    }
     if ($runnerSubnetPrefixes.Count -ne 1 -or
         @($runnerSubnet.delegations.serviceName).Count -ne 1 -or
         $runnerSubnet.delegations[0].serviceName -ne 'Microsoft.ContainerInstance/containerGroups' -or
-        -not $runnerSubnet.natGateway.id -or
-        $runnerSubnet.routeTable.id) {
+        -not $runnerNatGatewayId -or
+        $runnerRouteTableId) {
         throw 'The runner subnet does not have one prefix, the ACI delegation, direct NAT egress, and no UDR.'
     }
 
     $natGateway = az network nat gateway show `
-        --ids $runnerSubnet.natGateway.id `
+        --ids $runnerNatGatewayId `
         --output json | ConvertFrom-Json
     if (@($natGateway.publicIpAddresses).Count -ne 1 -or
         @($natGateway.publicIpPrefixes | Where-Object { $_ }).Count -ne 0) {

@@ -21,7 +21,41 @@ $stateDirectory = Join-Path $labRoot '.lab-state'
 $infrastructureStatePath = Join-Path $stateDirectory 'infrastructure.json'
 $pkiStatePath = Join-Path $stateDirectory 'pki.json'
 $credentialStatePath = Join-Path $stateDirectory 'credentials.json'
+$publisherOperationStatePath = Join-Path $stateDirectory 'publisher-operation.json'
 . (Join-Path $PSScriptRoot 'KeyVault-Rbac.ps1')
+
+function Write-PublisherOperationState {
+    param([Parameter(Mandatory)][Collections.IDictionary]$State)
+
+    $operationId = "$PID.$([guid]::NewGuid().ToString('N'))"
+    $temporaryPath = "$publisherOperationStatePath.$operationId.tmp"
+    $backupPath = "$publisherOperationStatePath.$operationId.bak"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($State | ConvertTo-Json -Depth 5),
+            [Text.UTF8Encoding]::new($false)
+        )
+        if (Test-Path -LiteralPath $publisherOperationStatePath) {
+            [IO.File]::Replace(
+                $temporaryPath,
+                $publisherOperationStatePath,
+                $backupPath,
+                $true
+            )
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $publisherOperationStatePath)
+        }
+    }
+    finally {
+        foreach ($cleanupPath in @($temporaryPath, $backupPath)) {
+            if (Test-Path -LiteralPath $cleanupPath) {
+                Remove-Item -LiteralPath $cleanupPath -Force
+            }
+        }
+    }
+}
 
 foreach ($requiredPath in @($infrastructureStatePath, $pkiStatePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -29,27 +63,21 @@ foreach ($requiredPath in @($infrastructureStatePath, $pkiStatePath)) {
     }
 }
 
-$infrastructure = Get-Content -LiteralPath $infrastructureStatePath -Raw | ConvertFrom-Json
-$pki = Get-Content -LiteralPath $pkiStatePath -Raw | ConvertFrom-Json
-$mfaCertificates = @($pki.certificates | Where-Object { $_.name -eq 'cba-playwright-test-mfa' })
-if ($mfaCertificates.Count -ne 1) {
-    throw 'Expected exactly one multifactor test certificate in PKI state.'
-}
-$mfaCertificate = $mfaCertificates[0]
-
-$passphrase = Import-Clixml -LiteralPath $pki.pfxPassphrasePath
-$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passphrase)
+$publisherLockPath = Join-Path $stateDirectory 'publisher-operation.lock'
 try {
-    $plainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
-    $passphrase = $null
+    $publisherLockStream = [IO.File]::Open(
+        $publisherLockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+}
+catch [IO.IOException] {
+    throw 'Another credential publisher operation already owns the exclusive local lock.'
 }
 
-$pfxBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($mfaCertificate.pfxPath))
-if ([Text.Encoding]::UTF8.GetByteCount($pfxBase64) -gt 24000) {
-    throw 'The base64-encoded PFX is too large for the configured Key Vault secret limit.'
-}
+try {
+$infrastructure = Get-Content -LiteralPath $infrastructureStatePath -Raw | ConvertFrom-Json
 
 az account set --subscription $infrastructure.subscriptionId
 $azureAccount = az account show --output json | ConvertFrom-Json
@@ -63,57 +91,8 @@ $vault = az keyvault show --name $vaultName --resource-group $resourceGroup --ou
 if ($vault.properties.publicNetworkAccess -ne 'Disabled') {
     throw "Key Vault '$vaultName' is expected to use private-only network access."
 }
-
-function Remove-PublisherContainerGroup {
-    param([Parameter(Mandatory)][string]$Name)
-
-    $deletionDeadline = (Get-Date).AddMinutes(5)
-    $consecutiveAbsenceChecks = 0
-    do {
-        $existingContainer = az container list `
-            --resource-group $resourceGroup `
-            --query "[?name=='$Name'].name | [0]" `
-            --output tsv
-        if ($existingContainer) {
-            $consecutiveAbsenceChecks = 0
-            az container delete `
-                --name $Name `
-                --resource-group $resourceGroup `
-                --yes `
-                --output none
-        } else {
-            $consecutiveAbsenceChecks++
-            if ($consecutiveAbsenceChecks -ge 3) {
-                return
-            }
-        }
-        Start-Sleep -Seconds 5
-    } while ((Get-Date) -lt $deletionDeadline)
-
-    throw "Publisher container '$Name' was not verifiably absent after deletion."
-}
-
-$stalePublisherContainers = @(
-    az container list `
-        --resource-group $resourceGroup `
-        --output json | ConvertFrom-Json
-) | Where-Object {
-    $isCurrentPublisher = (
-        $_.tags.component -eq 'credential-publisher' -and
-        $_.tags.managedBy -eq 'script'
-    )
-    $isLegacyDefaultPublisher = (
-        $PublisherContainerName -ceq 'aci-cba-secret-publisher' -and
-        -not $_.tags.component -and
-        $_.name -like 'aci-cba-secret-publisher-*' -and
-        $_.tags.managedBy -eq 'script'
-    )
-    $_.name -like "$PublisherContainerName-*" -and
-    $_.tags.workload -eq 'entra-cba-playwright' -and
-    ($isCurrentPublisher -or $isLegacyDefaultPublisher)
-}
-foreach ($staleContainer in $stalePublisherContainers) {
-    Remove-PublisherContainerGroup -Name $staleContainer.name
+if ($vault.properties.enableRbacAuthorization -ne $true) {
+    throw "Key Vault '$vaultName' must use Azure RBAC authorization, not access policies."
 }
 
 $runnerSubnetId = $infrastructure.outputs.runnerSubnetId.value
@@ -128,32 +107,109 @@ foreach ($requiredValue in @($runnerSubnetId, $publisherClientId, $publisherPrin
 
 # Public Azure built-in Key Vault Secrets Officer role definition ID.
 $secretsOfficerRoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
-$publisherMutationAssignments = @(Get-KeyVaultSecretMutationAssignments `
-    -PrincipalId $publisherPrincipalId `
-    -VaultResourceId $vault.id)
-$directStaleAssignments = @($publisherMutationAssignments | Where-Object {
-    $_.scope -eq $vault.id -or
-    ([string]$_.scope).StartsWith("$($vault.id)/", [StringComparison]::OrdinalIgnoreCase)
-})
-foreach ($assignment in $directStaleAssignments) {
-    az role assignment delete --ids $assignment.assignmentId --output none
-}
-if ($directStaleAssignments.Count -ne 0) {
-    $revocationDeadline = (Get-Date).AddMinutes(2)
-    do {
-        $publisherMutationAssignments = @(Get-KeyVaultSecretMutationAssignments `
-            -PrincipalId $publisherPrincipalId `
-            -VaultResourceId $vault.id)
-        if ($publisherMutationAssignments.Count -ne 0) {
-            Start-Sleep -Seconds 5
+
+$recordedPublisherAssignmentId = Get-RecordedPublisherAssignmentId `
+    -OperationStatePath $publisherOperationStatePath `
+    -PublisherPrincipalId $publisherPrincipalId `
+    -VaultResourceId $vault.id
+if ($recordedPublisherAssignmentId) {
+    $recordedPublisherOperation = Get-Content `
+        -LiteralPath $publisherOperationStatePath `
+        -Raw | ConvertFrom-Json
+    Remove-ExactPublisherAssignment `
+        -AssignmentId $recordedPublisherAssignmentId `
+        -PrincipalId $publisherPrincipalId `
+        -VaultResourceId $vault.id `
+        -RoleDefinitionId $secretsOfficerRoleDefinitionId `
+        -RequireAppearanceWindow
+    if ($recordedPublisherOperation.containerName) {
+        if (
+            $recordedPublisherOperation.containerName -cne $PublisherContainerName -or
+            $recordedPublisherOperation.operationId -cne
+                $recordedPublisherOperation.assignmentName
+        ) {
+            throw 'Publisher operation has invalid cloud-container ownership state.'
         }
-    } while ($publisherMutationAssignments.Count -ne 0 -and (Get-Date) -lt $revocationDeadline)
+        Remove-ExactPublisherContainerGroup `
+            -Name $recordedPublisherOperation.containerName `
+            -OperationId $recordedPublisherOperation.operationId `
+            -ResourceGroup $resourceGroup `
+            -RequireAppearanceWindow
+    }
+    Remove-Item -LiteralPath $publisherOperationStatePath -Force
 }
-if ($publisherMutationAssignments.Count -ne 0) {
+else {
+    $publisherMutationAssignments = @(Get-KeyVaultSecretMutationCapabilityAssignments `
+        -PrincipalId $publisherPrincipalId `
+        -VaultResourceId $vault.id)
+}
+if (-not $recordedPublisherAssignmentId -and $publisherMutationAssignments.Count -ne 0) {
     $roleSummary = $publisherMutationAssignments | ForEach-Object {
         "'$($_.roleName)' at '$($_.scope)'"
     }
-    throw "The publisher identity retains secret-mutation access through $($roleSummary -join ', ')."
+    throw (
+        'The publisher identity has unrecorded direct or self-elevatable secret-mutation ' +
+        'access that this script will not ' +
+        "delete: $($roleSummary -join ', ')."
+    )
+}
+
+$stalePublisherContainers = @(
+    @(
+        az container list `
+            --resource-group $resourceGroup `
+            --output json | ConvertFrom-Json
+    ) | Where-Object {
+        $isCurrentPublisher = (
+            $_.tags.component -eq 'credential-publisher' -and
+            $_.tags.managedBy -eq 'script'
+        )
+        $isLegacyDefaultPublisher = (
+            $PublisherContainerName -ceq 'aci-cba-secret-publisher' -and
+            -not $_.tags.component -and
+            $_.name -like 'aci-cba-secret-publisher-*' -and
+            $_.tags.managedBy -eq 'script'
+        )
+        (
+            $_.name -ceq $PublisherContainerName -or
+            $_.name -like "$PublisherContainerName-*"
+        ) -and
+        $_.tags.workload -eq 'entra-cba-playwright' -and
+        ($isCurrentPublisher -or $isLegacyDefaultPublisher)
+    }
+)
+if ($stalePublisherContainers.Count -ne 0) {
+    $containerNames = @($stalePublisherContainers.name | Sort-Object -CaseSensitive)
+    throw (
+        'Existing publisher containers are not owned by this local operation and were not ' +
+        "deleted: $($containerNames -join ', '). Review their exact cloud state first."
+    )
+}
+
+$pki = Get-Content -LiteralPath $pkiStatePath -Raw | ConvertFrom-Json
+$mfaCertificates = @($pki.certificates | Where-Object {
+    $_.name -eq 'cba-playwright-test-mfa'
+})
+if ($mfaCertificates.Count -ne 1) {
+    throw 'Expected exactly one multifactor test certificate in PKI state.'
+}
+$mfaCertificate = $mfaCertificates[0]
+
+$passphrase = Import-Clixml -LiteralPath $pki.pfxPassphrasePath
+$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passphrase)
+try {
+    $plainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+}
+finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    $passphrase = $null
+}
+
+$pfxBase64 = [Convert]::ToBase64String(
+    [IO.File]::ReadAllBytes($mfaCertificate.pfxPath)
+)
+if ([Text.Encoding]::UTF8.GetByteCount($pfxBase64) -gt 24000) {
+    throw 'The base64-encoded PFX is too large for the configured Key Vault secret limit.'
 }
 
 $publisherScript = @'
@@ -207,16 +263,27 @@ $publisherAssignmentId = (
     "$($vault.id)/providers/Microsoft.Authorization/roleAssignments/" +
     $publisherAssignmentName
 )
-$roleCreationAttempted = $false
-$containerCreationAttempted = $false
 $managementToken = $null
 $publisherAssignment = $null
 $pfxSecretId = $null
 $passphraseSecretId = $null
-$effectiveContainerName = "$PublisherContainerName-$((Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))"
+$effectiveContainerName = $PublisherContainerName
+$publisherOperation = [ordered]@{
+    assignmentId = $publisherAssignmentId
+    assignmentName = $publisherAssignmentName
+    containerName = $effectiveContainerName
+    containerStatus = 'pending'
+    operationId = $publisherAssignmentName
+    publisherPrincipalId = $publisherPrincipalId
+    roleDefinitionId = $secretsOfficerRoleDefinitionId
+    schemaVersion = 1
+    startedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    status = 'planned'
+    vaultId = $vault.id
+}
+Write-PublisherOperationState -State $publisherOperation
 
 try {
-    $roleCreationAttempted = $true
     $publisherAssignment = az role assignment create `
         --name $publisherAssignmentName `
         --assignee-object-id $publisherPrincipalId `
@@ -224,9 +291,17 @@ try {
         --role $secretsOfficerRoleDefinitionId `
         --scope $vault.id `
         --output json | ConvertFrom-Json
-    if ($publisherAssignment.id -ine $publisherAssignmentId) {
-        throw 'Azure returned an unexpected publisher role-assignment identity.'
+    if (
+        $publisherAssignment.id -ine $publisherAssignmentId -or
+        $publisherAssignment.principalId -ine $publisherPrincipalId -or
+        $publisherAssignment.scope -ine $vault.id -or
+        (Split-Path -Leaf $publisherAssignment.roleDefinitionId) -ine
+            $secretsOfficerRoleDefinitionId
+    ) {
+        throw 'Azure returned unexpected publisher role-assignment properties.'
     }
+    $publisherOperation.status = 'created'
+    Write-PublisherOperationState -State $publisherOperation
 
     $expiresOn = [DateTime]::Parse($mfaCertificate.notAfter).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $userAssignedIdentities = @{}
@@ -273,6 +348,7 @@ try {
             environment = 'poc'
             expiresAtUtc = [DateTimeOffset]::UtcNow.AddMinutes(15).ToString('o')
             managedBy = 'script'
+            operationId = $publisherAssignmentName
             workload = 'entra-cba-playwright'
         }
     }
@@ -285,18 +361,28 @@ try {
         throw 'Unable to obtain an Azure Resource Manager access token.'
     }
     $managementHeaders = @{ Authorization = "Bearer $managementToken" }
+    $managementHeaders['If-None-Match'] = '*'
     $containerUri = (
         "https://management.azure.com/subscriptions/$($infrastructure.subscriptionId)" +
         "/resourceGroups/$resourceGroup/providers/Microsoft.ContainerInstance" +
         "/containerGroups/$effectiveContainerName`?api-version=2023-05-01"
     )
-    $containerCreationAttempted = $true
-    Invoke-RestMethod `
+    $publisherOperation.containerStatus = 'planned'
+    Write-PublisherOperationState -State $publisherOperation
+    $createdContainer = Invoke-RestMethod `
         -Method Put `
         -Uri $containerUri `
         -Headers $managementHeaders `
         -ContentType 'application/json' `
-        -Body ($containerBody | ConvertTo-Json -Depth 20) | Out-Null
+        -Body ($containerBody | ConvertTo-Json -Depth 20)
+    if (
+        $createdContainer.name -cne $effectiveContainerName -or
+        $createdContainer.tags.operationId -cne $publisherAssignmentName
+    ) {
+        throw 'Azure did not grant the exact create-only publisher container lease.'
+    }
+    $publisherOperation.containerStatus = 'created'
+    Write-PublisherOperationState -State $publisherOperation
 
     $deadline = (Get-Date).AddMinutes(10)
     do {
@@ -305,20 +391,31 @@ try {
             --name $effectiveContainerName `
             --resource-group $resourceGroup `
             --output json | ConvertFrom-Json
-        $currentState = $container.containers[0].instanceView.currentState
+        $currentState = $null
+        if (
+            @($container.containers).Count -eq 1 -and
+            $null -ne $container.containers[0].instanceView
+        ) {
+            $currentState = $container.containers[0].instanceView.currentState
+        }
+        $currentStateName = if ($null -ne $currentState) {
+            [string]$currentState.state
+        } else {
+            ''
+        }
     } while (
         (
             $container.provisioningState -ne 'Succeeded' -or
-            $currentState.state -notin @('Terminated', 'Failed')
+            $currentStateName -notin @('Terminated', 'Failed')
         ) -and
         (Get-Date) -lt $deadline
     )
 
     if ($container.provisioningState -ne 'Succeeded' -or
-        $currentState.state -notin @('Terminated', 'Failed')) {
+        $currentStateName -notin @('Terminated', 'Failed')) {
         throw (
             "Credential publisher did not finish within ten minutes; provisioning is " +
-            "'$($container.provisioningState)' and runtime state is '$($currentState.state)'."
+            "'$($container.provisioningState)' and runtime state is '$currentStateName'."
         )
     }
     if (@($container.containers).Count -ne 1 -or
@@ -340,10 +437,15 @@ try {
             Start-Sleep -Seconds 5
         }
     }
-    if ($currentState.exitCode -ne 0 -or
+    $exitCode = if ($null -ne $currentState) {
+        $currentState.exitCode
+    } else {
+        $null
+    }
+    if ($null -eq $exitCode -or $exitCode -ne 0 -or
         $publisherLogs -notmatch '\bROUNDTRIP_VERIFIED\b' -or
         $publisherLogs -notmatch '\bPUBLISH_SUCCEEDED\b') {
-        throw "Credential publisher failed with state '$($currentState.state)' and exit code '$($currentState.exitCode)': $publisherLogs"
+        throw "Credential publisher failed with state '$currentStateName' and exit code '$exitCode': $publisherLogs"
     }
 
     $pfxSecretId = [regex]::Match($publisherLogs, 'PFX_SECRET_ID=(\S+)').Groups[1].Value
@@ -360,61 +462,31 @@ try {
     $containerBody = $null
     $cleanupErrors = [Collections.Generic.List[string]]::new()
     try {
-        if ($containerCreationAttempted) {
-            Remove-PublisherContainerGroup -Name $effectiveContainerName
-        }
-    } catch {
-        $cleanupErrors.Add("ACI deletion failed: $($_.Exception.Message)")
+        Remove-ExactPublisherAssignment `
+            -AssignmentId $publisherAssignmentId `
+            -PrincipalId $publisherPrincipalId `
+            -VaultResourceId $vault.id `
+            -RoleDefinitionId $secretsOfficerRoleDefinitionId `
+            -RequireAppearanceWindow:($publisherOperation.status -ne 'created') `
+            -ConfirmedLiveAssignment:($publisherOperation.status -eq 'created')
+    }
+    catch {
+        $cleanupErrors.Add("Publisher access verification failed: $($_.Exception.Message)")
     }
     try {
-        $revocationDeadline = (Get-Date).AddMinutes(2)
-        $lastRevocationError = $null
-        do {
-            $targetAssignments = @()
-            try {
-                $remainingPublisherAccess = @(
-                    Get-KeyVaultSecretMutationAssignments `
-                        -PrincipalId $publisherPrincipalId `
-                        -VaultResourceId $vault.id
-                )
-                $lastRevocationError = $null
-                $targetAssignments = @(
-                    $remainingPublisherAccess | Where-Object {
-                        $_.assignmentId -ieq $publisherAssignmentId
-                    }
-                )
-                if ($targetAssignments.Count -gt 1) {
-                    throw 'Azure returned duplicate exact publisher role assignments.'
-                }
-                if ($targetAssignments.Count -eq 1) {
-                    az role assignment delete `
-                        --ids $publisherAssignmentId `
-                        --output none
-                }
-                $lastRevocationError = $null
-            } catch {
-                $lastRevocationError = $_
-            }
-            if ($targetAssignments.Count -ne 0 -or $lastRevocationError) {
-                Start-Sleep -Seconds 5
-            }
-        } while (
-            ($targetAssignments.Count -ne 0 -or $lastRevocationError) -and
-            (Get-Date) -lt $revocationDeadline
-        )
-        $remainingPublisherAccess = @(
-            Get-KeyVaultSecretMutationAssignments `
-                -PrincipalId $publisherPrincipalId `
-                -VaultResourceId $vault.id
-        )
-        if ($remainingPublisherAccess.Count -ne 0) {
-            throw 'The publisher identity still has secret-mutation access.'
+        if ($publisherOperation.containerStatus -ne 'pending') {
+            Remove-ExactPublisherContainerGroup `
+                -Name $effectiveContainerName `
+                -OperationId $publisherAssignmentName `
+                -ResourceGroup $resourceGroup `
+                -RequireAppearanceWindow
         }
-        if ($lastRevocationError) {
-            throw $lastRevocationError
-        }
-    } catch {
-        $cleanupErrors.Add("Publisher access verification failed: $($_.Exception.Message)")
+    }
+    catch {
+        $cleanupErrors.Add("ACI deletion failed: $($_.Exception.Message)")
+    }
+    if ($cleanupErrors.Count -eq 0) {
+        Remove-Item -LiteralPath $publisherOperationStatePath -Force
     }
     $managementHeaders = $null
     $managementToken = $null
@@ -438,3 +510,7 @@ $credentialState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $credentia
 
 Write-Host "Public CRL is reachable at $($pki.crlUrl)"
 Write-Host "The private runner vault contains the PFX and passphrase as separate secrets."
+}
+finally {
+    $publisherLockStream.Dispose()
+}

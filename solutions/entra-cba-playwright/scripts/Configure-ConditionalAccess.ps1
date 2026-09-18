@@ -14,6 +14,24 @@ $stateDirectory = Join-Path $labRoot '.lab-state'
 $applicationStatePath = Join-Path $stateDirectory 'application.json'
 $entraStatePath = Join-Path $stateDirectory 'entra.json'
 $conditionalAccessStatePath = Join-Path $stateDirectory 'conditional-access.json'
+$conditionalAccessOperationPath = Join-Path `
+    $stateDirectory `
+    'conditional-access-operation.json'
+$conditionalAccessOperationLockPath = Join-Path `
+    $stateDirectory `
+    'conditional-access-operation.lock'
+try {
+    $conditionalAccessOperationLock = [IO.File]::Open(
+        $conditionalAccessOperationLockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+}
+catch [IO.IOException] {
+    throw 'Another Conditional Access configuration owns the exclusive local lock.'
+}
+try {
 
 foreach ($requiredPath in @($applicationStatePath, $entraStatePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -23,10 +41,31 @@ foreach ($requiredPath in @($applicationStatePath, $entraStatePath)) {
 
 $application = Get-Content -LiteralPath $applicationStatePath -Raw | ConvertFrom-Json
 $entra = Get-Content -LiteralPath $entraStatePath -Raw | ConvertFrom-Json
-$existingConditionalAccessState = if (Test-Path -LiteralPath $conditionalAccessStatePath) {
+$conditionalAccessStateRecord = if (Test-Path -LiteralPath $conditionalAccessStatePath) {
     Get-Content -LiteralPath $conditionalAccessStatePath -Raw | ConvertFrom-Json
 } else {
     $null
+}
+$provisionalConditionalAccessState = if (
+    $conditionalAccessStateRecord -and
+    $conditionalAccessStateRecord.policyState -ceq 'creationPendingReadback'
+) {
+    $conditionalAccessStateRecord
+}
+else {
+    $null
+}
+$existingConditionalAccessState = if ($provisionalConditionalAccessState) {
+    $null
+}
+else {
+    $conditionalAccessStateRecord
+}
+if (
+    $provisionalConditionalAccessState -and
+    -not (Test-Path -LiteralPath $conditionalAccessOperationPath -PathType Leaf)
+) {
+    throw 'Provisional Conditional Access state is missing its creation journal.'
 }
 if ($application.tenantId -ne $TenantId -or $entra.tenantId -ne $TenantId) {
     throw 'Local application or Entra state belongs to a different tenant.'
@@ -79,6 +118,58 @@ function Invoke-GraphJson {
         -ContentType 'application/json'
 }
 
+function Get-GraphCollection {
+    param([Parameter(Mandatory)][string]$Uri)
+
+    $items = [Collections.Generic.List[object]]::new()
+    while ($Uri) {
+        $response = Invoke-MgGraphRequest -Method GET -Uri $Uri
+        foreach ($item in @($response.value)) {
+            $items.Add($item)
+        }
+        $Uri = if ($response -is [Collections.IDictionary]) {
+            if ($response.Contains('@odata.nextLink')) {
+                [string]$response['@odata.nextLink']
+            } else {
+                $null
+            }
+        } else {
+            $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
+            if ($null -ne $nextLinkProperty) {
+                [string]$nextLinkProperty.Value
+            } else {
+                $null
+            }
+        }
+    }
+    return $items.ToArray()
+}
+
+function Get-ReconciledGraphMatches {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Lookup,
+        [switch]$WaitForAppearance
+    )
+
+    $appearanceDeadline = (Get-Date).AddMinutes(10)
+    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
+    $consecutiveAbsenceChecks = 0
+    do {
+        $matches = @(& $Lookup)
+        if ($matches.Count -ne 0 -or -not $WaitForAppearance) {
+            return $matches
+        }
+        if ((Get-Date) -ge $appearanceDeadline) {
+            $consecutiveAbsenceChecks++
+            if ($consecutiveAbsenceChecks -ge 3) {
+                return @()
+            }
+        }
+        Start-Sleep -Seconds 10
+    } while ((Get-Date) -lt $absenceDeadline)
+    throw 'Conditional Access policy absence could not be proven after the appearance window.'
+}
+
 function Get-ConditionalAccessPolicy {
     param(
         [Parameter(Mandatory)][string]$Uri,
@@ -112,10 +203,22 @@ function Get-ConditionalAccessPolicy {
                     return $policy
                 }
             } catch {
-                $statusCode = [int]$_.Exception.Response.StatusCode
+                $responseProperty = $_.Exception.PSObject.Properties['Response']
+                $statusCode = 0
+                if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+                    $statusCodeProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+                    if ($null -ne $statusCodeProperty) {
+                        $statusCode = [int]$statusCodeProperty.Value
+                    }
+                }
+                $errorDetailsMessage = if ($null -ne $_.ErrorDetails) {
+                    [string]$_.ErrorDetails.Message
+                } else {
+                    ''
+                }
                 $isResourceNotFound = (
                     $statusCode -eq 404 -and
-                    $_.ErrorDetails.Message -match '"code":"ResourceNotFound"'
+                    $errorDetailsMessage -match '"code":"ResourceNotFound"'
                 )
                 $isRequestTimeout = (
                     $_.Exception.Message -match 'configured HttpClient.Timeout'
@@ -149,12 +252,13 @@ function Get-ConditionalAccessPolicy {
 
 function Write-ConditionalAccessState {
     param(
-        [Parameter(Mandatory)][Collections.IDictionary]$StateRecord
+        [Parameter(Mandatory)][Collections.IDictionary]$StateRecord,
+        [string]$Path = $conditionalAccessStatePath
     )
 
     $operationId = "$PID.$([guid]::NewGuid().ToString('N'))"
-    $temporaryPath = "$conditionalAccessStatePath.$operationId.tmp"
-    $backupPath = "$conditionalAccessStatePath.$operationId.bak"
+    $temporaryPath = "$Path.$operationId.tmp"
+    $backupPath = "$Path.$operationId.bak"
     try {
         $json = $StateRecord | ConvertTo-Json -Depth 8
         [IO.File]::WriteAllText(
@@ -162,15 +266,15 @@ function Write-ConditionalAccessState {
             $json,
             [Text.UTF8Encoding]::new($false)
         )
-        if (Test-Path -LiteralPath $conditionalAccessStatePath) {
+        if (Test-Path -LiteralPath $Path) {
             [IO.File]::Replace(
                 $temporaryPath,
-                $conditionalAccessStatePath,
+                $Path,
                 $backupPath,
                 $true
             )
         } else {
-            [IO.File]::Move($temporaryPath, $conditionalAccessStatePath)
+            [IO.File]::Move($temporaryPath, $Path)
         }
     } finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -196,10 +300,12 @@ function New-ConditionalAccessStateRecord {
         authenticationStrengthId = $strength.id
         groupId = $entra.groupId
         policyCreated = $PolicyCreated
-        policyDisplayName = $PolicyDisplayName
+        policyDisplayName = $effectivePolicyDisplayName
         policyId = $PolicyId
         policyOriginalState = $PolicyOriginalState
         policyState = $PolicyState
+        requestedPolicyDisplayName = $PolicyDisplayName
+        schemaVersion = 2
         tenantId = $TenantId
         verifiedAt = (Get-Date).ToString('o')
     }
@@ -418,7 +524,7 @@ function Assert-LabPolicy {
 
 $policiesUri = 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies'
 $strengthsUri = 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies'
-$strengths = @((Invoke-MgGraphRequest -Method GET -Uri $strengthsUri).value)
+$strengths = @(Get-GraphCollection -Uri $strengthsUri)
 $strengthMatches = @($strengths | Where-Object {
     $_.displayName -eq 'Phishing-resistant MFA' -and $_.policyType -eq 'builtIn'
 })
@@ -427,17 +533,146 @@ if ($strengthMatches.Count -ne 1) {
 }
 $strength = $strengthMatches[0]
 
-$existingPolicies = @((Invoke-MgGraphRequest -Method GET -Uri $policiesUri).value)
-$matchingPolicies = @($existingPolicies | Where-Object { $_.displayName -ceq $PolicyDisplayName })
+function Assert-ConditionalAccessOperation {
+    param([Parameter(Mandatory)][Collections.IDictionary]$Operation)
+
+    $operationId = [guid]::Empty
+    if (
+        [int]$Operation.schemaVersion -ne 1 -or
+        $Operation.status -cne 'provisioning' -or
+        -not [guid]::TryParseExact(
+            [string]$Operation.operationId,
+            'D',
+            [ref]$operationId
+        ) -or
+        $Operation.policyDisplayName -cne
+            "$PolicyDisplayName [$($operationId.ToString('N'))]" -or
+        $Operation.requestedPolicyDisplayName -cne $PolicyDisplayName -or
+        $Operation.tenantId -ine $TenantId -or
+        $Operation.applicationId -ine $application.appId -or
+        $Operation.groupId -ine $entra.groupId -or
+        $Operation.authenticationStrengthId -ine $strength.id -or
+        $Operation.policyStatus -notin @('pending', 'planned', 'created')
+    ) {
+        throw 'Conditional Access journal does not match the exact requested policy contract.'
+    }
+}
+
+$conditionalAccessOperation = if (
+    Test-Path -LiteralPath $conditionalAccessOperationPath -PathType Leaf
+) {
+    Get-Content -LiteralPath $conditionalAccessOperationPath -Raw |
+        ConvertFrom-Json -AsHashtable
+}
+else {
+    $null
+}
+if ($existingConditionalAccessState) {
+    $effectivePolicyDisplayName = [string]$existingConditionalAccessState.policyDisplayName
+    if (
+        $existingConditionalAccessState.PSObject.Properties.Name -contains
+            'requestedPolicyDisplayName' -and
+        $existingConditionalAccessState.requestedPolicyDisplayName -cne
+            $PolicyDisplayName
+    ) {
+        throw 'Recorded Conditional Access state belongs to another requested policy name.'
+    }
+    if ($conditionalAccessOperation) {
+        Assert-ConditionalAccessOperation -Operation $conditionalAccessOperation
+        if (
+            $conditionalAccessOperation.policyStatus -cne 'created' -or
+            $conditionalAccessOperation.policyId -ine
+                $existingConditionalAccessState.policyId -or
+            $conditionalAccessOperation.policyDisplayName -cne
+                $existingConditionalAccessState.policyDisplayName
+        ) {
+            throw 'Retained Conditional Access journal does not match the final policy state.'
+        }
+    }
+}
+else {
+    if (-not $conditionalAccessOperation) {
+        $operationId = [guid]::NewGuid()
+        $conditionalAccessOperation = [ordered]@{
+            applicationId = $application.appId
+            authenticationStrengthId = $strength.id
+            groupId = $entra.groupId
+            operationId = $operationId.ToString('D')
+            policyDisplayName = "$PolicyDisplayName [$($operationId.ToString('N'))]"
+            policyId = $null
+            policyStatus = 'pending'
+            requestedPolicyDisplayName = $PolicyDisplayName
+            schemaVersion = 1
+            status = 'provisioning'
+            tenantId = $TenantId
+        }
+    }
+    Assert-ConditionalAccessOperation -Operation $conditionalAccessOperation
+    if ($provisionalConditionalAccessState -and (
+        [int]$provisionalConditionalAccessState.schemaVersion -ne 2 -or
+        $provisionalConditionalAccessState.policyCreated -ne $true -or
+        $provisionalConditionalAccessState.policyState -cne
+            'creationPendingReadback' -or
+        $provisionalConditionalAccessState.tenantId -ine $TenantId -or
+        $provisionalConditionalAccessState.applicationId -ine $application.appId -or
+        $provisionalConditionalAccessState.groupId -ine $entra.groupId -or
+        $provisionalConditionalAccessState.authenticationStrengthId -ine $strength.id -or
+        $provisionalConditionalAccessState.policyId -ine
+            $conditionalAccessOperation.policyId -or
+        $provisionalConditionalAccessState.policyDisplayName -cne
+            $conditionalAccessOperation.policyDisplayName -or
+        $provisionalConditionalAccessState.requestedPolicyDisplayName -cne
+            $PolicyDisplayName
+    )) {
+        throw 'Provisional Conditional Access state does not match its creation journal.'
+    }
+    Write-ConditionalAccessState `
+        -StateRecord $conditionalAccessOperation `
+        -Path $conditionalAccessOperationPath
+    $effectivePolicyDisplayName = [string]$conditionalAccessOperation.policyDisplayName
+}
+
+$matchingPolicies = @(Get-ReconciledGraphMatches -Lookup {
+    @(Get-GraphCollection -Uri $policiesUri) | Where-Object {
+        $_.displayName -ceq $effectivePolicyDisplayName
+    }
+} -WaitForAppearance:(
+    $conditionalAccessOperation -and
+    $conditionalAccessOperation.policyStatus -in @('planned', 'created')
+))
 if ($matchingPolicies.Count -gt 1) {
-    throw "More than one Conditional Access policy is named '$PolicyDisplayName'."
+    throw "More than one Conditional Access policy is named '$effectivePolicyDisplayName'."
+}
+if ($matchingPolicies.Count -eq 1 -and -not $existingConditionalAccessState) {
+    if (
+        $conditionalAccessOperation.policyId -and
+        $matchingPolicies[0].id -ine $conditionalAccessOperation.policyId
+    ) {
+        throw 'The Conditional Access journal identifies another policy object.'
+    }
+    Assert-LabPolicy `
+        -Policy $matchingPolicies[0] `
+        -GroupId $entra.groupId `
+        -ApplicationId $application.appId `
+        -AuthenticationStrengthId $strength.id
+    if ($matchingPolicies[0].state -cne 'disabled') {
+        throw 'Recovered Conditional Access policy is not disabled.'
+    }
+    $conditionalAccessOperation.policyId = $matchingPolicies[0].id
+    $conditionalAccessOperation.policyStatus = 'created'
+    Write-ConditionalAccessState `
+        -StateRecord $conditionalAccessOperation `
+        -Path $conditionalAccessOperationPath
 }
 if ($existingConditionalAccessState -and $matchingPolicies.Count -eq 0) {
     throw 'The recorded Conditional Access policy no longer exists; refusing to create a replacement.'
 }
+if ($existingConditionalAccessState -and -not [bool]$existingConditionalAccessState.policyCreated) {
+    throw 'Recorded state does not prove that this solution created the Conditional Access policy.'
+}
 
 $policyBody = @{
-    displayName = $PolicyDisplayName
+    displayName = $effectivePolicyDisplayName
     state = 'disabled'
     conditions = @{
         applications = @{
@@ -465,12 +700,27 @@ $policyBody = @{
 $policyCreated = $false
 $originalPolicyState = $null
 if ($matchingPolicies.Count -eq 0) {
+    if (
+        $conditionalAccessOperation.policyId -or
+        $conditionalAccessOperation.policyStatus -ceq 'created'
+    ) {
+        throw 'The exact journaled Conditional Access policy no longer exists.'
+    }
+    $conditionalAccessOperation.policyStatus = 'planned'
+    Write-ConditionalAccessState `
+        -StateRecord $conditionalAccessOperation `
+        -Path $conditionalAccessOperationPath
     $policy = Invoke-GraphJson -Method POST -Uri $policiesUri -Body $policyBody
     $policyCreated = $true
     if ([string]$policy.id -notmatch '^[0-9a-fA-F-]{36}$') {
         throw 'Microsoft Graph did not return a valid policy ID for the new disabled policy.'
     }
     $policyUri = "$policiesUri/$($policy.id)"
+    $conditionalAccessOperation.policyId = $policy.id
+    $conditionalAccessOperation.policyStatus = 'created'
+    Write-ConditionalAccessState `
+        -StateRecord $conditionalAccessOperation `
+        -Path $conditionalAccessOperationPath
     $provisionalState = New-ConditionalAccessStateRecord `
         -PolicyId $policy.id `
         -PolicyCreated $true `
@@ -478,31 +728,25 @@ if ($matchingPolicies.Count -eq 0) {
         -PolicyState 'creationPendingReadback'
     try {
         Write-ConditionalAccessState -StateRecord $provisionalState
-    } catch {
-        $stateWriteError = $_
-        try {
-            $createdPolicy = Get-ConditionalAccessPolicy -Uri $policyUri
-            Assert-LabPolicy `
-                -Policy $createdPolicy `
-                -GroupId $entra.groupId `
-                -ApplicationId $application.appId `
-                -AuthenticationStrengthId $strength.id
-            if ($createdPolicy.state -ne 'disabled') {
-                throw "The untracked new policy is '$($createdPolicy.state)', not 'disabled'."
-            }
-            Invoke-MgGraphRequest -Method DELETE -Uri $policyUri | Out-Null
-        } catch {
-            throw (
-                "Writing cleanup metadata for new policy '$($policy.id)' failed: " +
-                "$($stateWriteError.Exception.Message) Deleting that disabled policy also failed: " +
-                "$($_.Exception.Message)"
-            )
-        }
-        throw $stateWriteError
+    }
+    catch {
+        throw [InvalidOperationException]::new(
+            (
+                "Writing final cleanup metadata for policy '$($policy.id)' failed; " +
+                'the deterministic creation journal was retained for a safe rerun.'
+            ),
+            $_.Exception
+        )
     }
 } else {
     $policy = $matchingPolicies[0]
-    $originalPolicyState = $policy.state
+    $policyCreated = [bool]$conditionalAccessOperation
+    $originalPolicyState = if ($existingConditionalAccessState) {
+        $policy.state
+    }
+    else {
+        $null
+    }
     Assert-LabPolicy `
         -Policy $policy `
         -GroupId $entra.groupId `
@@ -514,7 +758,7 @@ if ($existingConditionalAccessState -and (
     $existingConditionalAccessState.applicationId -ne $application.appId -or
     $existingConditionalAccessState.groupId -ne $entra.groupId -or
     $existingConditionalAccessState.policyId -ne $policy.id -or
-    $existingConditionalAccessState.policyDisplayName -cne $PolicyDisplayName
+    $existingConditionalAccessState.policyDisplayName -cne $effectivePolicyDisplayName
 )) {
     throw 'Existing Conditional Access state does not match the exact lab policy.'
 }
@@ -630,8 +874,15 @@ if (-not $stateCommitCompleted) {
     $stateRecord.verifiedAt = (Get-Date).ToString('o')
     Write-ConditionalAccessState -StateRecord $stateRecord
 }
+if (Test-Path -LiteralPath $conditionalAccessOperationPath) {
+    Remove-Item -LiteralPath $conditionalAccessOperationPath -Force
+}
 
-Write-Host "Conditional Access policy '$PolicyDisplayName' is '$State'."
+Write-Host "Conditional Access policy '$effectivePolicyDisplayName' is '$State'."
+}
+finally {
+    $conditionalAccessOperationLock.Dispose()
+}
 Write-Host "Target group: $($entra.groupId)"
 Write-Host "Target application: $($application.appId)"
 Write-Host "Grant: $($strength.displayName) ($($strength.id))"

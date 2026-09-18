@@ -11,6 +11,8 @@ $labRoot = Split-Path -Parent $PSScriptRoot
 $stateDirectory = Join-Path $labRoot '.lab-state'
 $infrastructureStatePath = Join-Path $stateDirectory 'infrastructure.json'
 $applicationStatePath = Join-Path $stateDirectory 'application.json'
+$applicationOperationStatePath = Join-Path $stateDirectory 'application-operation.json'
+$applicationOperationLockPath = Join-Path $stateDirectory 'application-operation.lock'
 $distributionDirectory = Join-Path $labRoot 'dist'
 $toolDirectory = Join-Path $labRoot '.lab-tools'
 $deploymentClientPath = Join-Path $toolDirectory 'StaticSitesClient.exe'
@@ -32,32 +34,240 @@ if ($account.tenantId -ne $infrastructure.tenantId) {
 $appUrl = $infrastructure.outputs.appUrl.value
 $staticWebAppName = $infrastructure.outputs.staticWebAppName.value
 
-$applicationCreated = $false
-$servicePrincipalCreated = $false
+function Write-ApplicationStateAtomically {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Collections.IDictionary]$State
+    )
+
+    $writeId = "$PID.$([guid]::NewGuid().ToString('N'))"
+    $temporaryPath = "$Path.$writeId.tmp"
+    $backupPath = "$Path.$writeId.bak"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($State | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false)
+        )
+        if (Test-Path -LiteralPath $Path) {
+            [IO.File]::Replace($temporaryPath, $Path, $backupPath, $true)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $Path)
+        }
+    }
+    finally {
+        foreach ($cleanupPath in @($temporaryPath, $backupPath)) {
+            if (Test-Path -LiteralPath $cleanupPath) {
+                Remove-Item -LiteralPath $cleanupPath -Force
+            }
+        }
+    }
+}
+
+function Get-ReconciledApplications {
+    param(
+        [Parameter(Mandatory)][string]$DisplayName,
+        [switch]$WaitForAppearance
+    )
+
+    $appearanceDeadline = (Get-Date).AddMinutes(10)
+    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
+    $consecutiveAbsenceChecks = 0
+    $escapedDisplayName = $DisplayName.Replace("'", "''")
+    do {
+        $applications = @(
+            az ad app list `
+                --filter "displayName eq '$escapedDisplayName'" `
+                --query '[].{appId:appId,displayName:displayName,id:id,signInAudience:signInAudience,redirectUris:spa.redirectUris}' `
+                --output json | ConvertFrom-Json
+        )
+        if ($applications.Count -ne 0 -or -not $WaitForAppearance) {
+            return $applications
+        }
+        if ((Get-Date) -ge $appearanceDeadline) {
+            $consecutiveAbsenceChecks++
+            if ($consecutiveAbsenceChecks -ge 3) {
+                return @()
+            }
+        }
+        Start-Sleep -Seconds 10
+    } while ((Get-Date) -lt $absenceDeadline)
+    throw 'Application absence could not be proven after the appearance window.'
+}
+
+function Get-ReconciledServicePrincipals {
+    param(
+        [Parameter(Mandatory)][string]$AppId,
+        [switch]$WaitForAppearance
+    )
+
+    $appearanceDeadline = (Get-Date).AddMinutes(10)
+    $absenceDeadline = $appearanceDeadline.AddSeconds(30)
+    $consecutiveAbsenceChecks = 0
+    do {
+        $servicePrincipals = @(
+            az ad sp list `
+                --filter "appId eq '$AppId'" `
+                --query '[].{id:id,appId:appId}' `
+                --output json | ConvertFrom-Json
+        )
+        if ($servicePrincipals.Count -ne 0 -or -not $WaitForAppearance) {
+            return $servicePrincipals
+        }
+        if ((Get-Date) -ge $appearanceDeadline) {
+            $consecutiveAbsenceChecks++
+            if ($consecutiveAbsenceChecks -ge 3) {
+                return @()
+            }
+        }
+        Start-Sleep -Seconds 10
+    } while ((Get-Date) -lt $absenceDeadline)
+    throw 'Service-principal absence could not be proven after the appearance window.'
+}
+
 try {
-if (Test-Path $applicationStatePath) {
-    $existingApplicationState = Get-Content $applicationStatePath -Raw | ConvertFrom-Json
+    $applicationOperationLock = [IO.File]::Open(
+        $applicationOperationLockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+}
+catch [IO.IOException] {
+    throw 'Another test-application deployment owns the exclusive local lock.'
+}
+
+try {
+if (Test-Path -LiteralPath $applicationStatePath -PathType Leaf) {
+    $existingApplicationState = Get-Content `
+        -LiteralPath $applicationStatePath `
+        -Raw | ConvertFrom-Json
     if ($existingApplicationState.tenantId -ne $infrastructure.tenantId -or
-        $existingApplicationState.appUrl -ne $appUrl) {
+        $existingApplicationState.appUrl -ne $appUrl -or
+        $existingApplicationState.testUsername -cne $TestUsername) {
         throw 'Existing application state does not match the deployed infrastructure.'
     }
-    $application = [pscustomobject]@{
-        appId = $existingApplicationState.appId
-        displayName = $existingApplicationState.appDisplayName
-        id = $existingApplicationState.appObjectId
-    }
-    $servicePrincipal = [pscustomobject]@{
-        appId = $existingApplicationState.appId
-        id = $existingApplicationState.servicePrincipalObjectId
-    }
-} else {
-    $uniqueDisplayName = "$AppDisplayName [$([guid]::NewGuid().ToString('N').Substring(0, 8))]"
-    $application = az ad app create `
-        --display-name $uniqueDisplayName `
-        --sign-in-audience AzureADMyOrg `
-        --query '{appId:appId,id:id,displayName:displayName}' `
+    $application = az ad app show `
+        --id $existingApplicationState.appObjectId `
+        --query '{appId:appId,displayName:displayName,id:id,signInAudience:signInAudience,redirectUris:spa.redirectUris}' `
         --output json | ConvertFrom-Json
-    $applicationCreated = $true
+    $servicePrincipal = az ad sp show `
+        --id $existingApplicationState.servicePrincipalObjectId `
+        --query '{appId:appId,id:id}' `
+        --output json | ConvertFrom-Json
+    if (
+        $application.id -ne $existingApplicationState.appObjectId -or
+        $application.appId -ne $existingApplicationState.appId -or
+        $application.displayName -cne $existingApplicationState.appDisplayName -or
+        $application.signInAudience -ne 'AzureADMyOrg' -or
+        @($application.redirectUris).Count -ne 1 -or
+        $application.redirectUris[0] -cne $appUrl -or
+        $servicePrincipal.id -ne $existingApplicationState.servicePrincipalObjectId -or
+        $servicePrincipal.appId -ne $application.appId
+    ) {
+        throw 'The recorded application and service principal do not match live Entra objects.'
+    }
+}
+else {
+    $operation = if (
+        Test-Path -LiteralPath $applicationOperationStatePath -PathType Leaf
+    ) {
+        Get-Content -LiteralPath $applicationOperationStatePath -Raw |
+            ConvertFrom-Json -AsHashtable
+    }
+    else {
+        $operationId = [guid]::NewGuid()
+        [ordered]@{
+            appDisplayName = "$AppDisplayName [$($operationId.ToString('N'))]"
+            appId = $null
+            appObjectId = $null
+            appStatus = 'pending'
+            appUrl = $appUrl
+            operationId = $operationId.ToString('D')
+            schemaVersion = 1
+            servicePrincipalObjectId = $null
+            servicePrincipalStatus = 'pending'
+            spaStatus = 'pending'
+            staticWebAppName = $staticWebAppName
+            status = 'provisioning'
+            testUsername = $TestUsername
+            tenantId = $infrastructure.tenantId
+        }
+    }
+    $operationId = [guid]::Empty
+    if (
+        [int]$operation.schemaVersion -ne 1 -or
+        $operation.status -cne 'provisioning' -or
+        -not [guid]::TryParseExact(
+            [string]$operation.operationId,
+            'D',
+            [ref]$operationId
+        ) -or
+        $operation.appDisplayName -cne
+            "$AppDisplayName [$($operationId.ToString('N'))]" -or
+        $operation.tenantId -ine $infrastructure.tenantId -or
+        $operation.appUrl -cne $appUrl -or
+        $operation.staticWebAppName -cne $staticWebAppName -or
+        $operation.testUsername -cne $TestUsername -or
+        $operation.appStatus -notin @('pending', 'planned', 'created') -or
+        $operation.spaStatus -notin @('pending', 'planned', 'verified') -or
+        $operation.servicePrincipalStatus -notin @('pending', 'planned', 'created')
+    ) {
+        throw 'Application provisioning journal does not match the exact deployment contract.'
+    }
+    Write-ApplicationStateAtomically `
+        -Path $applicationOperationStatePath `
+        -State $operation
+
+    $applications = @(Get-ReconciledApplications `
+        -DisplayName $operation.appDisplayName `
+        -WaitForAppearance:(
+            $operation.appStatus -in @('planned', 'created')
+        ))
+    if ($applications.Count -gt 1) {
+        throw 'More than one application matched the recovery-bound display name.'
+    }
+    if ($applications.Count -eq 0) {
+        if ($operation.appObjectId -or $operation.appStatus -ceq 'created') {
+            throw 'The exact journaled application no longer exists.'
+        }
+        $operation.appStatus = 'planned'
+        Write-ApplicationStateAtomically `
+            -Path $applicationOperationStatePath `
+            -State $operation
+        $application = az ad app create `
+            --display-name $operation.appDisplayName `
+            --sign-in-audience AzureADMyOrg `
+            --query '{appId:appId,id:id,displayName:displayName,signInAudience:signInAudience,redirectUris:spa.redirectUris}' `
+            --output json | ConvertFrom-Json
+        if (-not $application.id -or -not $application.appId) {
+            throw 'Application creation returned no identifiers; recovery state remains planned.'
+        }
+    }
+    else {
+        $application = $applications[0]
+    }
+    if (
+        $application.displayName -cne $operation.appDisplayName -or
+        $application.signInAudience -cne 'AzureADMyOrg' -or
+        (
+            $operation.appObjectId -and
+            $application.id -ine $operation.appObjectId
+        ) -or
+        (
+            $operation.appId -and
+            $application.appId -ine $operation.appId
+        )
+    ) {
+        throw 'The recovery-bound application has unexpected live properties.'
+    }
+    $operation.appId = $application.appId
+    $operation.appObjectId = $application.id
+    $operation.appStatus = 'created'
+    Write-ApplicationStateAtomically `
+        -Path $applicationOperationStatePath `
+        -State $operation
 
     $spaBody = @{
         spa = @{
@@ -66,34 +276,91 @@ if (Test-Path $applicationStatePath) {
     } | ConvertTo-Json -Depth 5 -Compress
 
     $spaBodyPath = Join-Path $stateDirectory 'spa-registration-patch.json'
-    Set-Content -Path $spaBodyPath -Value $spaBody -Encoding utf8NoBOM
-    try {
-        az rest `
-            --method PATCH `
-            --url "https://graph.microsoft.com/v1.0/applications/$($application.id)" `
-            --headers 'Content-Type=application/json' `
-            --body "@$spaBodyPath" `
-            --output none
-    } finally {
-        Remove-Item $spaBodyPath -Force -ErrorAction SilentlyContinue
+    $redirectUris = @($application.redirectUris)
+    if ($redirectUris.Count -ne 1 -or $redirectUris[0] -cne $appUrl) {
+        if ($redirectUris.Count -ne 0) {
+            throw 'The recovery-bound application has unexpected SPA redirect URIs.'
+        }
+        $operation.spaStatus = 'planned'
+        Write-ApplicationStateAtomically `
+            -Path $applicationOperationStatePath `
+            -State $operation
+        Set-Content -Path $spaBodyPath -Value $spaBody -Encoding utf8NoBOM
+        try {
+            az rest `
+                --method PATCH `
+                --url "https://graph.microsoft.com/v1.0/applications/$($application.id)" `
+                --headers 'Content-Type=application/json' `
+                --body "@$spaBodyPath" `
+                --output none
+        }
+        finally {
+            Remove-Item $spaBodyPath -Force -ErrorAction SilentlyContinue
+        }
     }
+    $application = az ad app show `
+        --id $operation.appObjectId `
+        --query '{appId:appId,displayName:displayName,id:id,signInAudience:signInAudience,redirectUris:spa.redirectUris}' `
+        --output json | ConvertFrom-Json
+    if (
+        $application.id -ine $operation.appObjectId -or
+        $application.appId -ine $operation.appId -or
+        $application.displayName -cne $operation.appDisplayName -or
+        $application.signInAudience -cne 'AzureADMyOrg' -or
+        @($application.redirectUris).Count -ne 1 -or
+        $application.redirectUris[0] -cne $appUrl
+    ) {
+        throw 'Application redirect-URI read-back verification failed.'
+    }
+    $operation.spaStatus = 'verified'
+    Write-ApplicationStateAtomically `
+        -Path $applicationOperationStatePath `
+        -State $operation
 
-    $servicePrincipals = @(
-        az ad sp list `
-            --filter "appId eq '$($application.appId)'" `
-            --query '[].{id:id,appId:appId}' `
-            --output json | ConvertFrom-Json
-    )
-
+    $servicePrincipals = @(Get-ReconciledServicePrincipals `
+        -AppId $application.appId `
+        -WaitForAppearance:(
+            $operation.servicePrincipalStatus -in @('planned', 'created')
+        ))
+    if ($servicePrincipals.Count -gt 1) {
+        throw 'More than one service principal matched the journaled application ID.'
+    }
     if ($servicePrincipals.Count -eq 0) {
+        if (
+            $operation.servicePrincipalObjectId -or
+            $operation.servicePrincipalStatus -ceq 'created'
+        ) {
+            throw 'The exact journaled service principal no longer exists.'
+        }
+        $operation.servicePrincipalStatus = 'planned'
+        Write-ApplicationStateAtomically `
+            -Path $applicationOperationStatePath `
+            -State $operation
         $servicePrincipal = az ad sp create `
             --id $application.appId `
             --query '{id:id,appId:appId}' `
             --output json | ConvertFrom-Json
-        $servicePrincipalCreated = $true
-    } else {
+        if (-not $servicePrincipal.id) {
+            throw 'Service-principal creation returned no object ID; recovery state remains planned.'
+        }
+    }
+    else {
         $servicePrincipal = $servicePrincipals[0]
     }
+    if (
+        $servicePrincipal.appId -ine $operation.appId -or
+        (
+            $operation.servicePrincipalObjectId -and
+            $servicePrincipal.id -ine $operation.servicePrincipalObjectId
+        )
+    ) {
+        throw 'The recovery-bound service principal has unexpected live properties.'
+    }
+    $operation.servicePrincipalObjectId = $servicePrincipal.id
+    $operation.servicePrincipalStatus = 'created'
+    Write-ApplicationStateAtomically `
+        -Path $applicationOperationStatePath `
+        -State $operation
 }
 
 Push-Location $labRoot
@@ -169,36 +436,37 @@ $state = [ordered]@{
     appId = $application.appId
     appObjectId = $application.id
     appUrl = $appUrl
+    applicationOwned = $true
     servicePrincipalObjectId = $servicePrincipal.id
+    servicePrincipalOwned = $true
+    schemaVersion = 2
+    status = 'verified'
     staticWebAppName = $staticWebAppName
     testUsername = $TestUsername
     tenantId = $infrastructure.tenantId
 }
-$state | ConvertTo-Json -Depth 5 | Set-Content -Path $applicationStatePath -Encoding utf8NoBOM
-} catch {
-    $deploymentError = $_
-    $cleanupErrors = [Collections.Generic.List[string]]::new()
-    if ($servicePrincipalCreated -and $servicePrincipal.id) {
-        try {
-            az ad sp delete --id $servicePrincipal.id
-        } catch {
-            $cleanupErrors.Add("Service principal cleanup failed: $($_.Exception.Message)")
-        }
-    }
-    if ($applicationCreated -and $application.id) {
-        try {
-            az ad app delete --id $application.id
-        } catch {
-            $cleanupErrors.Add("Application cleanup failed: $($_.Exception.Message)")
-        }
-    }
-    if ($cleanupErrors.Count -ne 0) {
+Write-ApplicationStateAtomically -Path $applicationStatePath -State $state
+if (Test-Path -LiteralPath $applicationOperationStatePath) {
+    Remove-Item -LiteralPath $applicationOperationStatePath -Force
+}
+}
+catch {
+    if (
+        -not (Test-Path -LiteralPath $applicationStatePath -PathType Leaf) -and
+        (Test-Path -LiteralPath $applicationOperationStatePath -PathType Leaf)
+    ) {
         throw [InvalidOperationException]::new(
-            "Application deployment failed and cleanup was incomplete: $($cleanupErrors -join ' | ')",
-            $deploymentError.Exception
+            (
+                'Application deployment was interrupted; exact app and service-principal ' +
+                'recovery state was retained for a safe rerun.'
+            ),
+            $_.Exception
         )
     }
-    throw $deploymentError
+    throw
+}
+finally {
+    $applicationOperationLock.Dispose()
 }
 
 Write-Host "Test application deployed to $appUrl"
