@@ -877,6 +877,7 @@ try {
         -Object $networkReceipt `
         -Expected @(
             'azure',
+            'credentialHandling',
             'github',
             'receiptSha256',
             'runner',
@@ -885,6 +886,14 @@ try {
             'verifiedAt'
         ) `
         -Label 'Runner network receipt'
+    Assert-ExactProperties `
+        -Object $networkReceipt.credentialHandling `
+        -Expected @(
+            'credentialFilesWritten',
+            'provider',
+            'transport'
+        ) `
+        -Label 'Runner credential-handling evidence'
     Assert-ExactProperties `
         -Object $networkReceipt.azure `
         -Expected @(
@@ -940,7 +949,10 @@ try {
         $identityReceipt.identitySha256 -cne $expectedIdentitySha256) {
         throw 'The identity receipt does not match the exact workflow revision and lab identity.'
     }
-    if ([int]$networkReceipt.schemaVersion -ne 2 -or
+    if ([int]$networkReceipt.schemaVersion -ne 3 -or
+        $networkReceipt.credentialHandling.provider -ne 'key-vault-oidc' -or
+        $networkReceipt.credentialHandling.transport -ne 'memory-only' -or
+        $networkReceipt.credentialHandling.credentialFilesWritten -ne $false -or
         $networkReceipt.verificationIdSha256 -cne $verificationIdSha256 -or
         $networkReceipt.receiptSha256 -notmatch '^[0-9a-f]{64}$' -or
         $networkReceipt.azure.keyVaultHostSha256 -cne (

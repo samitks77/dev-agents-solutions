@@ -13,6 +13,35 @@ requested capability to its implementation and proof gate. Use the
 [internal showcase runbook](docs/internal-showcase.md) to demonstrate the result without relying on
 screenshots or rerunning tenant mutations.
 
+## Fast path for an existing CBA environment
+
+If you already have an Entra CBA test user, a PFX, and an HTTPS application that exposes the exact
+identity contract used by this repository, you can validate the browser integration without
+deploying the full lab:
+
+```powershell
+Copy-Item .env.example .env
+# Populate only the ignored .env copy with your test values.
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test
+```
+
+Keep `CBA_CERTIFICATE_SOURCE=file` explicit in `.env`. The provider reads the operator-supplied PFX
+into a `Buffer` and passes it to Playwright; it does not silently fall back between local-file and
+cloud modes. The wrong-origin project overrides only the certificate origin, preserving the negative
+control that proves the certificate is not offered to an unrelated origin.
+
+This fast path proves the browser/application contract only. It does **not** prove the private
+runner, GitHub OIDC, Conditional Access, cleanup, or exact 37-check contract. Use the full deployment
+and FreshRun path for those assurances.
+
+The focused browser technique is based on Playwright's
+[Implementing Microsoft Entra Certificate-Based Authentication with Playwright](https://dev.to/playwright/implementing-microsoft-entra-certificate-based-authentication-with-playwright-4lbc)
+guidance. This repository adds explicit source selection, private Key Vault access, immutable OIDC
+claim checks, isolated negative controls, bounded evidence, recovery, cleanup, and exact verification.
+
 ## Deploy infrastructure now
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fsamitks77%2Fdev-agents-solutions%2Fmain%2Fsolutions%2Fentra-cba-playwright%2Ftemplates%2Fazuredeploy%2Fentra-cba-playwright-infrastructure.json)
@@ -157,6 +186,10 @@ The report is deliberately sanitized: it contains no credential, private key, ce
 passphrase, token, raw sign-in record, tenant/subscription/user/object/application/policy identifier,
 sign-in correlation or workflow-run identifier, deployed hostname, or IP address.
 
+The PDF and Tier A artifact record the last accepted run; they do not prove later implementation
+changes. In particular, the memory-only cloud credential transport is not considered newly proven
+until Tier C completes against its exact commit and emits a schema-v3 network receipt.
+
 ## Public template safety
 
 This repository contains no populated tenant, subscription, user, object, application, policy,
@@ -198,7 +231,7 @@ flowchart LR
     DNS --> PE
     PE --> KV
     ACI -->|GitHub OIDC JWT| ENTRA
-    ACI -->|PFX read through PE| KV
+    ACI -->|PFX + passphrase read through PE into memory| KV
     ACI -->|Playwright client certificate| ENTRA
     ENTRA --> APP
     APP -->|username, tenant ID, object ID| ACI
@@ -219,8 +252,24 @@ During CI, `Get-CbaCredentialsFromKeyVault.mjs` independently proves that:
 
 - the container has an IPv4 address inside the runner subnet;
 - the vault hostname resolves only to the exact Private Endpoint IP;
-- the GitHub OIDC issuer, audience, subject, repository, run, revision, and `self-hosted` runner claim are exact;
-- the OIDC exchange succeeds and both Key Vault secrets can be read through the private endpoint.
+- the GitHub OIDC issuer, audience, subject, repository, run, revision, workflow, ref, event, and
+  `self-hosted` runner claim are exact;
+- the OIDC exchange succeeds and both enabled, unexpired Key Vault secrets are read through the
+  private endpoint with their exact content types;
+- the PFX is canonical base64 and OpenSSL accepts it with the retrieved passphrase;
+- the PFX is passed to Playwright as an in-memory `Buffer`, while only the sanitized network receipt
+  is written to disk.
+
+Cloud mode rejects `CBA_PFX_PATH`, `CBA_PFX_PASSPHRASE`, and
+`CBA_PFX_PASSPHRASE_PATH`; the workflow also fails if the legacy credential directory or a PFX
+under `.artifacts` appears. The schema-v3 receipt explicitly records
+`provider=key-vault-oidc`, `transport=memory-only`, and `credentialFilesWritten=false`.
+
+The provider overwrites its JavaScript PFX buffer during normal process teardown as defense in
+depth. This is not a guarantee of complete memory erasure: Playwright/OpenSSL can hold native copies,
+JavaScript strings such as the passphrase cannot be reliably zeroed, and abrupt process termination
+can bypass normal teardown. The security claim is narrowly that cloud credential material is not
+intentionally written to the runner filesystem.
 
 The GitHub configuration script requires GitHub's immutable owner-ID/repository-ID subject format.
 It resolves the repository through the GitHub API and refuses federation unless the numeric owner
@@ -390,6 +439,27 @@ These first runs are feasibility prechecks. The final acceptance receipts are ge
 the cloud run creates its deterministic proof-set ID, so every local browser control, cloud receipt
 and Conditional Access receipt binds to the same tested repository revision.
 
+#### Client-certificate troubleshooting
+
+Enable Playwright's focused client-certificate diagnostics for one local run:
+
+```powershell
+$env:DEBUG = 'pw:client-certificates'
+npm test
+Remove-Item Env:DEBUG
+```
+
+The equivalent Bash invocation is:
+
+```bash
+DEBUG=pw:client-certificates npm test
+```
+
+Do not add Chromium's `--disable-web-security` switch. It changes browser security behavior and
+breaks the client-certificate flow rather than fixing CBA. Debug logs can expose request origins and
+other environment context; review and sanitize them before sharing, and never publish them as proof
+artifacts.
+
 ### Phase 6: publish secrets and configure GitHub OIDC
 
 ```powershell
@@ -427,9 +497,9 @@ The launcher:
 3. downloads the pinned GitHub runner archive and verifies its SHA-256;
 4. starts the one-job ephemeral runner in the digest-pinned Playwright image;
 5. exchanges the GitHub OIDC token only after exact claim validation;
-6. resolves and reads Key Vault only through the Private Endpoint;
-7. runs Playwright with the retrieved certificate;
-8. validates the commitment-only identity and network receipts;
+6. resolves and reads Key Vault only through the Private Endpoint, validating secret state and type;
+7. validates the PFX and gives Playwright an in-memory buffer without creating credential files;
+8. validates the commitment-only identity and schema-v3 memory-transport/network receipts;
 9. scans the completed job log against every exact and encoded local deployment value;
 10. deletes the transient GitHub artifact after verified download;
 11. deletes any workflow run whose public log cannot be verified;
@@ -598,6 +668,11 @@ public-proof tier.
 Checking Tier A's static artifact is never a substitute for Tier B, and replaying Tier B's retained
 evidence is never a substitute for a fresh Tier C run — the wrapper's banners, the underlying
 scripts' own output, and the workflow scope all say so explicitly.
+
+Evidence replay remains versioned: schema-v2 receipts require the ten historical file-backed
+workflow step names, while schema-v3 receipts require the ten memory-only step names. Both paths
+still contribute exactly ten workflow checks to the fixed 37-check proof; neither accepts a mixed
+contract.
 
 Run a fresh proof locally from the clean, cloud-tested commit:
 

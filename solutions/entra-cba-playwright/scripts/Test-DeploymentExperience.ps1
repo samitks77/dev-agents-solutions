@@ -210,6 +210,110 @@ if (
     throw 'The GitHub verification button must expose only safe public-proof verification.'
 }
 
+$pocWorkflowPath = Join-Path `
+    $repositoryRoot `
+    '.github\workflows\entra-cba-playwright-poc.yml'
+$pocWorkflow = Get-Content -LiteralPath $pocWorkflowPath -Raw
+$memoryOnlyStepNames = @(
+    'Validate the dispatch identifier',
+    'Check out the tested revision',
+    'Verify private Key Vault DNS',
+    'Assert memory-only credential inputs',
+    'Validate in-memory credential provider',
+    'Type-check the POC',
+    'Run the headless CBA feasibility test',
+    'Validate bounded test evidence',
+    'Upload bounded test evidence',
+    'Verify no credential files were materialized'
+)
+$legacyStepNames = @(
+    'Validate the dispatch identifier',
+    'Check out the tested revision',
+    'Verify private Key Vault DNS',
+    'Exchange GitHub OIDC and retrieve CBA credentials',
+    'Validate the retrieved PFX',
+    'Type-check the POC',
+    'Run the headless CBA feasibility test',
+    'Validate bounded test evidence',
+    'Upload bounded test evidence',
+    'Remove runtime credentials'
+)
+foreach ($stepName in $memoryOnlyStepNames) {
+    $stepPattern = '(?m)^\s*-\s+name:\s+' + [regex]::Escape($stepName) + '\s*$'
+    if ([regex]::Matches($pocWorkflow, $stepPattern).Count -ne 1) {
+        throw "The CBA workflow must contain exactly one '$stepName' step."
+    }
+}
+if (
+    $pocWorkflow -notmatch (
+        '(?m)^\s*CBA_CERTIFICATE_SOURCE:\s*key-vault-oidc\s*$'
+    ) -or
+    $pocWorkflow -match (
+        '(?m)^\s*-\s+name:\s+(?:Exchange GitHub OIDC and retrieve CBA credentials|' +
+        'Validate the retrieved PFX|Remove runtime credentials)\s*$'
+    ) -or
+    $pocWorkflow -match (
+        '(?m)^\s*run:\s+node scripts/Get-CbaCredentialsFromKeyVault\.mjs\s*$'
+    )
+) {
+    throw 'The CBA workflow does not enforce the memory-only credential contract.'
+}
+
+$showProofPath = Join-Path $PSScriptRoot 'Show-E2eProof.ps1'
+$showProofTokens = $null
+$showProofErrors = $null
+$showProofAst = [Management.Automation.Language.Parser]::ParseFile(
+    $showProofPath,
+    [ref]$showProofTokens,
+    [ref]$showProofErrors
+)
+if ($showProofErrors.Count -ne 0) {
+    throw 'Show-E2eProof.ps1 did not parse while checking versioned workflow steps.'
+}
+$stepAssignments = @($showProofAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+    $node.Left.VariablePath.UserPath -ceq 'requiredStepNames'
+}, $true))
+if ($stepAssignments.Count -ne 2) {
+    throw 'Show-E2eProof.ps1 must contain exactly two versioned workflow-step contracts.'
+}
+$legacyProofSteps = @($stepAssignments[0].Right.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.StringConstantExpressionAst]
+}, $true) | ForEach-Object Value)
+$memoryOnlyProofSteps = @($stepAssignments[1].Right.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.StringConstantExpressionAst]
+}, $true) | ForEach-Object Value)
+Assert-ExactSet `
+    -Actual $legacyProofSteps `
+    -Expected $legacyStepNames `
+    -Label 'Schema-v2 proof workflow steps'
+Assert-ExactSet `
+    -Actual $memoryOnlyProofSteps `
+    -Expected $memoryOnlyStepNames `
+    -Label 'Schema-v3 proof workflow steps'
+
+$playwrightConfigPath = Join-Path $labRoot 'playwright.config.ts'
+$playwrightConfig = Get-Content -LiteralPath $playwrightConfigPath -Raw
+if (
+    $playwrightConfig -match '\bpfxPath\b' -or
+    $playwrightConfig -notmatch '\bloadCbaClientCertificate\b'
+) {
+    throw 'Playwright configuration must use the in-memory credential provider.'
+}
+if (
+    $playwrightConfig -notmatch (
+        "(?s)name:\s*'cba-wrong-origin'.*?" +
+        'clientCertificates:\s*\[\s*\{\s*\.\.\.clientCertificate,\s*' +
+        "origin:\s*'https://wrong-origin\.invalid'"
+    )
+) {
+    throw 'The wrong-origin project must retain its isolated certificate origin.'
+}
+
 $bootstrapPath = Join-Path $PSScriptRoot 'Bootstrap-PostDeploy.ps1'
 $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
 $bootstrapImportIndex = $bootstrap.IndexOf("'Import-InfrastructureState.ps1'")

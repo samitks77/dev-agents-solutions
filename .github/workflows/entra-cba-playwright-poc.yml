@@ -34,6 +34,7 @@ jobs:
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       CBA_APP_HOSTNAME_MASK: ${{ secrets.CBA_APP_HOSTNAME_MASK }}
       CBA_APP_URL: ${{ secrets.CBA_APP_URL }}
+      CBA_CERTIFICATE_SOURCE: key-vault-oidc
       CBA_CERTAUTH_ORIGIN: https://certauth.login.microsoftonline.com
       CBA_EXPECTED_OIDC_SUBJECT: ${{ secrets.CBA_EXPECTED_OIDC_SUBJECT }}
       CBA_EXPECTED_PRIVATE_ENDPOINT_IP: ${{ secrets.KEY_VAULT_PRIVATE_ENDPOINT_IP }}
@@ -119,18 +120,25 @@ jobs:
           fi
           echo "Key Vault resolves to the exact private endpoint IP."
 
-      - name: Exchange GitHub OIDC and retrieve CBA credentials
-        working-directory: solutions/entra-cba-playwright
-        run: node scripts/Get-CbaCredentialsFromKeyVault.mjs
-
-      - name: Validate the retrieved PFX
+      - name: Assert memory-only credential inputs
         shell: bash
         run: |
           set -euo pipefail
-          openssl pkcs12 \
-            -in "$CBA_PFX_PATH" \
-            -passin "file:$CBA_PFX_PASSPHRASE_PATH" \
-            -noout
+          [[ "$CBA_CERTIFICATE_SOURCE" == "key-vault-oidc" ]]
+          for variable in CBA_PFX_PATH CBA_PFX_PASSPHRASE CBA_PFX_PASSPHRASE_PATH; do
+            if printenv "$variable" >/dev/null 2>&1; then
+              echo "::error::$variable must be absent in memory-only cloud mode."
+              exit 1
+            fi
+          done
+          if [[ -e "$RUNNER_TEMP/entra-cba" ]]; then
+            echo "::error::A legacy credential directory already exists."
+            exit 1
+          fi
+
+      - name: Validate in-memory credential provider
+        working-directory: solutions/entra-cba-playwright
+        run: npm run test:credential-provider
 
       - name: Install pinned Node dependencies
         working-directory: solutions/entra-cba-playwright
@@ -181,13 +189,19 @@ jobs:
           path: solutions/entra-cba-playwright/.artifacts/receipts
           retention-days: 1
 
-      - name: Remove runtime credentials
+      - name: Verify no credential files were materialized
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          runtime_directory="${RUNNER_TEMP}/entra-cba"
-          if [[ -d "$runtime_directory" ]]; then
-            find "$runtime_directory" -type f -exec shred -u {} \;
-            rmdir "$runtime_directory"
+          if [[ -e "$RUNNER_TEMP/entra-cba" ]]; then
+            echo "::error::The legacy runtime credential directory was materialized."
+            exit 1
+          fi
+          artifact_root="solutions/entra-cba-playwright/.artifacts"
+          if [[ -d "$artifact_root" ]] && find "$artifact_root" -type f \
+            \( -name "*.pfx" -o -name "passphrase.txt" \) \
+            -print -quit | grep -q .; then
+            echo "::error::Credential material was written beneath .artifacts."
+            exit 1
           fi

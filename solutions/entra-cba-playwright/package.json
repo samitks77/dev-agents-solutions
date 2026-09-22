@@ -9,6 +9,7 @@
   "scripts": {
     "build:app": "node scripts/build-app.mjs",
     "test": "playwright test --project=cba-feasibility",
+    "test:credential-provider": "node scripts/Test-CbaCredentialProvider.mjs",
     "test:headed": "playwright test --project=cba-feasibility --headed",
     "test:wrong-origin": "playwright test --project=cba-wrong-origin",
     "test:session": "playwright test --project=authenticated-session",

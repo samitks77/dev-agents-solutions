@@ -196,6 +196,7 @@ $requiredPlaceholders = @(
     'CBA_TENANT_ID=<entra-tenant-id>',
     'CBA_TEST_USERNAME=<dedicated-test-user-upn>',
     'CBA_TEST_OBJECT_ID=<dedicated-test-user-object-id>',
+    'CBA_CERTIFICATE_SOURCE=file',
     'CBA_PFX_PATH=<absolute-path-to-test-user-pfx>',
     'CBA_PFX_PASSPHRASE=<inject-at-runtime-do-not-commit>'
 )
