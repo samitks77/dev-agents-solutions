@@ -167,6 +167,28 @@ $env:ENTRA_CBA_BOOTSTRAP_AUTOAPPROVE = 'CONFIRMED'
 
 ## Customer-ready validation package
 
+### Latest customer-shareable fresh proof
+
+The [customer verification PDF](docs/entra-cba-playwright-customer-verification-2026-09-22.pdf)
+and its [machine-readable sanitized proof](docs/entra-cba-playwright-customer-verification-2026-09-22.json)
+capture a new Tier C run from 2026-09-22 against commit `fb0771dec58abe5fbc4b2c39325f08c8c356a10d`.
+The result is an exact **37/37 pass**, including schema-v3 memory-only Key Vault credential handling,
+positive and negative Conditional Access evidence, policy restoration, log privacy, artifact
+deletion, ACI cleanup, and GitHub runner deregistration.
+
+Customer verification PDF SHA-256:
+`13854de491b38f2d5fffd7653c050351efa68cab67197c171c41a8ef3ba1e92f`.
+
+Sanitized proof file SHA-256:
+`c431869afd66be809a401cb9a5a29708f64242d7025f631afb27163e719ad84f`.
+
+The customer package contains no tenant, subscription, user, object, application, policy, workflow
+run, sign-in correlation, hostname, IP, CIDR, certificate, token, PFX, private key, or passphrase.
+It proves this public reference implementation in an isolated lab; it is not evidence from, or an
+assertion about, a customer tenant.
+
+### Full operator runbook and historical proof
+
 Download the
 [full end-to-end test results and manual operator runbook](docs/entra-cba-playwright-e2e-test-results-and-runbook.pdf).
 The report explains why and how each of the 37 proof checks was performed, records the
@@ -186,9 +208,9 @@ The report is deliberately sanitized: it contains no credential, private key, ce
 passphrase, token, raw sign-in record, tenant/subscription/user/object/application/policy identifier,
 sign-in correlation or workflow-run identifier, deployed hostname, or IP address.
 
-The PDF and Tier A artifact record the last accepted run; they do not prove later implementation
-changes. In particular, the memory-only cloud credential transport is not considered newly proven
-until Tier C completes against its exact commit and emits a schema-v3 network receipt.
+The full operator runbook and original downloaded proof record the 2026-09-16 run; they do not prove
+later implementation changes. The latest customer package above separately binds the memory-only
+cloud credential transport to its tested commit and schema-v3 network receipt.
 
 ## Public template safety
 
@@ -661,7 +683,7 @@ public-proof tier.
 
 | Tier | Script invocation | What it checks | Tenant mutation | Banner |
 |---|---|---|---|---|
-| **A — Public proof** | `-Tier PublicProof` | Repository hygiene, the exact portal ARM output contract, the published PDF hash, and the downloaded public proof's pinned SHA-256, 37/0 result, cleanup, restoration and privacy fields. | **None.** Anonymous HTTPS download only; no authentication or tenant access. This verifies published evidence, not a new sign-in. | `PUBLIC_PROOF_PASS` |
+| **A — Public proof** | `-Tier PublicProof` | Repository hygiene, the exact portal ARM output contract, the historical PDF/download pins, and the latest customer JSON/PDF hashes, schema-v3 memory-only contract, 37/0 result, cleanup, restoration and privacy fields. | **None.** Anonymous HTTPS download only; no authentication or tenant access. This verifies published evidence, not a new sign-in. | `PUBLIC_PROOF_PASS` |
 | **B — Read-only evidence replay** | `-Tier EvidenceReplay` | Runs `Show-E2eProof.ps1` against retained receipts and live read-only Azure/GitHub state, then fails unless `overallResult` is `PASS` with exactly 37 passed, 0 failed and 37 check records. | **None.** Live Azure/GitHub reads only. | `EVIDENCE_REPLAY_PASS` |
 | **C — Fresh end-to-end proof** | See the command below. | Creates one new cloud/browser proof set, regenerates headed, wrong-origin, five-run reliability and session-reuse controls, performs correlated MFA/SFA Conditional Access proof, restores every policy, then requires exactly 37/37. | **Yes.** Ephemeral Azure/GitHub activity plus a bounded Conditional Access transaction. Requires both general typed consent and the exclusive-window switch. | `FRESH_RUN_PASS` |
 
