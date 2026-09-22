@@ -141,13 +141,33 @@ const decodeBase64Pfx = (value) => {
   return pfx;
 };
 
-const validatePfxWithOpenSsl = (pfx, passphrase) =>
+export const validatePfxWithOpenSsl = (
+  pfx,
+  passphrase,
+  executable = 'openssl',
+) =>
   new Promise((resolve, reject) => {
+    const passphraseEnvironmentName = 'CBA_OPENSSL_VALIDATION_PASSPHRASE';
+    const childEnvironment = {
+      ...process.env,
+      [passphraseEnvironmentName]: passphrase,
+    };
     const child = spawn(
-      'openssl',
-      ['pkcs12', '-in', '/dev/stdin', '-passin', 'fd:3', '-noout'],
-      { stdio: ['pipe', 'ignore', 'pipe', 'pipe'] },
+      executable,
+      [
+        'pkcs12',
+        '-in',
+        '-',
+        '-passin',
+        `env:${passphraseEnvironmentName}`,
+        '-noout',
+      ],
+      {
+        env: childEnvironment,
+        stdio: ['pipe', 'ignore', 'pipe'],
+      },
     );
+    delete childEnvironment[passphraseEnvironmentName];
     let settled = false;
 
     const fail = (message) => {
@@ -175,11 +195,7 @@ const validatePfxWithOpenSsl = (pfx, passphrase) =>
       fail('OpenSSL closed its PFX input before validation completed.');
     });
     child.stderr.resume();
-    child.stdio[3].once('error', () => {
-      fail('OpenSSL closed its passphrase input before validation completed.');
-    });
     child.stdin.end(pfx);
-    child.stdio[3].end(passphrase, 'utf8');
   });
 
 export const buildNetworkReceipt = ({
