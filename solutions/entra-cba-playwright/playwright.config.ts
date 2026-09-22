@@ -1,11 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
+import { loadCbaClientCertificate } from './scripts/Get-CbaCredentialsFromKeyVault.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 const environmentFile = path.join(labRoot, '.env');
-if (existsSync(environmentFile)) {
+if (
+  process.env.CBA_LOAD_ENV_FILE !== 'false'
+  && existsSync(environmentFile)
+) {
   process.loadEnvFile(environmentFile);
 }
 
@@ -20,20 +24,6 @@ const requiredEnvironmentVariable = (name: string): string => {
 const applicationUrl = requiredEnvironmentVariable('CBA_APP_URL');
 const certificateOrigin =
   process.env.CBA_CERTAUTH_ORIGIN?.trim() || 'https://certauth.login.microsoftonline.com';
-const pfxPath = path.resolve(requiredEnvironmentVariable('CBA_PFX_PATH'));
-const passphrasePath = process.env.CBA_PFX_PASSPHRASE_PATH?.trim();
-const passphrase = process.env.CBA_PFX_PASSPHRASE ?? (
-  passphrasePath ? readFileSync(path.resolve(passphrasePath), 'utf8') : undefined
-);
-if (!passphrase) {
-  throw new Error(
-    "Set 'CBA_PFX_PASSPHRASE' or 'CBA_PFX_PASSPHRASE_PATH' to the PFX passphrase.",
-  );
-}
-
-if (!existsSync(pfxPath)) {
-  throw new Error(`The PFX file '${pfxPath}' does not exist.`);
-}
 
 for (const origin of [applicationUrl, certificateOrigin]) {
   const url = new URL(origin);
@@ -42,11 +32,11 @@ for (const origin of [applicationUrl, certificateOrigin]) {
   }
 }
 
-const clientCertificate = {
+const loadedCertificate = await loadCbaClientCertificate({
   origin: certificateOrigin,
-  passphrase,
-  pfxPath,
-};
+});
+const clientCertificate = loadedCertificate.clientCertificate;
+process.once('exit', loadedCertificate.dispose);
 
 const config: PlaywrightTestConfig = {
   testDir: path.join(labRoot, 'tests'),

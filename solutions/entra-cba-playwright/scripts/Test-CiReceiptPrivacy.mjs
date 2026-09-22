@@ -58,10 +58,14 @@ if (
 }
 
 const network = await readReceipt('runner-network.json');
+if (![2, 3].includes(network.schemaVersion)) {
+  throw new Error('Network receipt schema version is not supported.');
+}
 exactKeys(
   network,
   [
     'azure',
+    ...(network.schemaVersion === 3 ? ['credentialHandling'] : []),
     'github',
     'receiptSha256',
     'runner',
@@ -71,6 +75,13 @@ exactKeys(
   ],
   'Network receipt',
 );
+if (network.schemaVersion === 3) {
+  exactKeys(
+    network.credentialHandling,
+    ['credentialFilesWritten', 'provider', 'transport'],
+    'Network receipt credential-handling section',
+  );
+}
 exactKeys(
   network.azure,
   [
@@ -115,8 +126,15 @@ const committedHashes = [
   network.runner.privateIpv4InExpectedSubnetSha256,
 ];
 if (
-  network.schemaVersion !== 2
-  || committedHashes.some((value) => !sha256Pattern.test(value))
+  committedHashes.some((value) => !sha256Pattern.test(value))
+  || (
+    network.schemaVersion === 3
+    && (
+      network.credentialHandling.provider !== 'key-vault-oidc'
+      || network.credentialHandling.transport !== 'memory-only'
+      || network.credentialHandling.credentialFilesWritten !== false
+    )
+  )
   || network.azure.keyVaultRead !== 'succeeded'
   || network.azure.resolvedVaultIpv4AddressCount !== 1
   || network.github.oidcAudience !== 'api://AzureADTokenExchange'

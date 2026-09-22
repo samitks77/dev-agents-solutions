@@ -48,6 +48,10 @@ jobs:
         working-directory: solutions/entra-cba-playwright
         run: npm run build:app
 
+      - name: Test the memory-only CBA credential provider
+        working-directory: solutions/entra-cba-playwright
+        run: npm run test:credential-provider
+
       - name: Parse every PowerShell script
         shell: pwsh
         run: |

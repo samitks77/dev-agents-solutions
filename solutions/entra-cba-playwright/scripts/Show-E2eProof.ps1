@@ -243,18 +243,42 @@ Add-ProofCheck `
     -Source 'Live GitHub API' `
     -Evidence "jobs=$($job.Count); conclusion=$($job[0].conclusion)"
 
-$requiredStepNames = @(
-    'Validate the dispatch identifier',
-    'Check out the tested revision',
-    'Verify private Key Vault DNS',
-    'Exchange GitHub OIDC and retrieve CBA credentials',
-    'Validate the retrieved PFX',
-    'Type-check the POC',
-    'Run the headless CBA feasibility test',
-    'Validate bounded test evidence',
-    'Upload bounded test evidence',
-    'Remove runtime credentials'
-)
+$networkSchemaVersion = [int]$network.schemaVersion
+if ($networkSchemaVersion -eq 2) {
+    $requiredStepNames = @(
+        'Validate the dispatch identifier',
+        'Check out the tested revision',
+        'Verify private Key Vault DNS',
+        'Exchange GitHub OIDC and retrieve CBA credentials',
+        'Validate the retrieved PFX',
+        'Type-check the POC',
+        'Run the headless CBA feasibility test',
+        'Validate bounded test evidence',
+        'Upload bounded test evidence',
+        'Remove runtime credentials'
+    )
+    $credentialHandlingContractValid = $true
+} elseif ($networkSchemaVersion -eq 3) {
+    $requiredStepNames = @(
+        'Validate the dispatch identifier',
+        'Check out the tested revision',
+        'Verify private Key Vault DNS',
+        'Assert memory-only credential inputs',
+        'Validate in-memory credential provider',
+        'Type-check the POC',
+        'Run the headless CBA feasibility test',
+        'Validate bounded test evidence',
+        'Upload bounded test evidence',
+        'Verify no credential files were materialized'
+    )
+    $credentialHandlingContractValid = (
+        $network.credentialHandling.provider -eq 'key-vault-oidc' -and
+        $network.credentialHandling.transport -eq 'memory-only' -and
+        $network.credentialHandling.credentialFilesWritten -eq $false
+    )
+} else {
+    throw "Unsupported runner network receipt schema '$networkSchemaVersion'."
+}
 foreach ($stepName in $requiredStepNames) {
     $step = @($job[0].steps | Where-Object { $_.name -eq $stepName })
     Add-ProofCheck `
@@ -406,7 +430,8 @@ Add-ProofCheck `
     -Stage 'Private credential path' `
     -Name 'Runner resolved and read Key Vault only at the private IP' `
     -Condition (
-        [int]$network.schemaVersion -eq 2 -and
+        $networkSchemaVersion -in @(2, 3) -and
+        $credentialHandlingContractValid -and
         $network.azure.keyVaultRead -eq 'succeeded' -and
         $network.azure.keyVaultHostSha256 -ceq (
             Get-TextSha256 -Text "$($runner.network.keyVaultName).vault.azure.net"

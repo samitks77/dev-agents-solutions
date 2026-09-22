@@ -124,7 +124,9 @@ try {
 
 $env:CBA_APP_CLIENT_ID = $application.appId
 $env:CBA_APP_URL = $application.appUrl
+$env:CBA_CERTIFICATE_SOURCE = 'file'
 $env:CBA_CERTAUTH_ORIGIN = 'https://certauth.login.microsoftonline.com'
+$env:CBA_LOAD_ENV_FILE = 'false'
 $env:CBA_PFX_PATH = $certificate[0].pfxPath
 $env:CBA_SHOW_PROOF = if ($ShowProof) { 'true' } else { 'false' }
 $env:CBA_TENANT_ID = $application.tenantId
@@ -326,7 +328,9 @@ try {
     @(
         'CBA_APP_CLIENT_ID',
         'CBA_APP_URL',
+        'CBA_CERTIFICATE_SOURCE',
         'CBA_CERTAUTH_ORIGIN',
+        'CBA_LOAD_ENV_FILE',
         'CBA_PFX_PASSPHRASE',
         'CBA_PFX_PATH',
         'CBA_SIGN_IN_CORRELATION_ID',
