@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 3,
+  "artifactType": "customer-shareable-sanitized-verification",
+  "generatedAtUtc": "2026-09-22T17:30:36.215Z",
+  "verdict": "PASS",
+  "scope": {
+    "statement": "Fresh end-to-end verification of the public Entra CBA and Playwright reference solution.",
+    "environment": "Isolated reference lab; this is not evidence from, or an assertion about, a customer tenant."
+  },
+  "source": {
+    "repository": "samitks77/dev-agents-solutions",
+    "repositoryUrl": "https://github.com/samitks77/dev-agents-solutions",
+    "branch": "main",
+    "testedCommit": "fb0771dec58abe5fbc4b2c39325f08c8c356a10d",
+    "solutionPath": "solutions/entra-cba-playwright"
+  },
+  "verification": {
+    "checksTotal": 37,
+    "checksPassed": 37,
+    "checksFailed": 0,
+    "credentialProvider": "key-vault-oidc",
+    "credentialTransport": "memory-only",
+    "cloudCredentialFilesWritten": false,
+    "publicLogPrivacy": "pass"
+  },
+  "browserControls": {
+    "freshHeadlessIdentity": "pass",
+    "headedIdentity": "pass",
+    "independentHeadlessRuns": "5/5 pass",
+    "wrongOriginCertificateIsolation": "pass",
+    "authenticatedSessionReuse": "pass"
+  },
+  "conditionalAccess": {
+    "mfaClassifiedCertificate": "satisfied phishing-resistant MFA",
+    "sfaClassifiedCertificate": "rejected by the exact authentication-strength policy",
+    "labPolicyFinalState": "report-only",
+    "reviewedManagedPoliciesRestored": true
+  },
+  "cleanup": {
+    "transientEvidenceArtifactDeleted": true,
+    "ephemeralAciContainerDeleted": true,
+    "ephemeralGitHubRunnerDeregistered": true
+  },
+  "privacy": {
+    "tenantIdentifiersIncluded": false,
+    "subscriptionIdentifiersIncluded": false,
+    "userOrObjectIdentifiersIncluded": false,
+    "workflowRunOrCorrelationIdentifiersIncluded": false,
+    "deployedHostnamesOrNetworkAddressesIncluded": false,
+    "credentialsCertificatesOrPassphrasesIncluded": false
+  },
+  "checks": [
+    {
+      "stage": "Cross-gate binding",
+      "name": "Cloud, browser, policy and restoration evidence share one proof set",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub control plane",
+      "name": "Exact workflow run completed successfully",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub control plane",
+      "name": "Tested branch and commit are exact",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub control plane",
+      "name": "One exact verification job passed",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Validate the dispatch identifier",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Check out the tested revision",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Verify private Key Vault DNS",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Assert memory-only credential inputs",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Validate in-memory credential provider",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Type-check the POC",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Run the headless CBA feasibility test",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Validate bounded test evidence",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Upload bounded test evidence",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub job execution",
+      "name": "Verify no credential files were materialized",
+      "result": "PASS"
+    },
+    {
+      "stage": "Public log privacy",
+      "name": "GitHub job log contains no exact or encoded lab deployment values",
+      "result": "PASS"
+    },
+    {
+      "stage": "Bounded evidence",
+      "name": "Identity receipt SHA-256 matches the launcher receipt",
+      "result": "PASS"
+    },
+    {
+      "stage": "Bounded evidence",
+      "name": "Network receipt SHA-256 matches the launcher receipt",
+      "result": "PASS"
+    },
+    {
+      "stage": "Playwright identity",
+      "name": "Exact identity commitment, run, and SHA were verified",
+      "result": "PASS"
+    },
+    {
+      "stage": "Local browser controls",
+      "name": "Headed Chromium rendered the exact identity",
+      "result": "PASS"
+    },
+    {
+      "stage": "Local browser controls",
+      "name": "Five independent headless sessions passed",
+      "result": "PASS"
+    },
+    {
+      "stage": "Local browser controls",
+      "name": "Wrong-origin certificate isolation passed",
+      "result": "PASS"
+    },
+    {
+      "stage": "Local browser controls",
+      "name": "Authenticated session reused without a new CBA request",
+      "result": "PASS"
+    },
+    {
+      "stage": "Private credential path",
+      "name": "Runner resolved and read Key Vault only at the private IP",
+      "result": "PASS"
+    },
+    {
+      "stage": "GitHub workload identity",
+      "name": "OIDC issuer, audience, subject, repository, run, and SHA are exact",
+      "result": "PASS"
+    },
+    {
+      "stage": "Ephemeral runner identity",
+      "name": "ACI runner name, label, subnet, and operating system are exact",
+      "result": "PASS"
+    },
+    {
+      "stage": "Azure control plane",
+      "name": "Azure CLI is on the exact subscription and tenant",
+      "result": "PASS"
+    },
+    {
+      "stage": "Azure private network",
+      "name": "Key Vault public access remains disabled and default action is deny",
+      "result": "PASS"
+    },
+    {
+      "stage": "Azure private network",
+      "name": "Key Vault Private Endpoint is succeeded and approved",
+      "result": "PASS"
+    },
+    {
+      "stage": "Azure private network",
+      "name": "Private DNS A record maps the vault to the exact private IP",
+      "result": "PASS"
+    },
+    {
+      "stage": "Azure runner network",
+      "name": "Runner subnet remains delegated to ACI and attached to NAT",
+      "result": "PASS"
+    },
+    {
+      "stage": "Conditional Access positive",
+      "name": "MFA-classified certificate satisfied the exact lab policy",
+      "result": "PASS"
+    },
+    {
+      "stage": "Conditional Access negative",
+      "name": "SFA-classified certificate failed only the exact lab policy",
+      "result": "PASS"
+    },
+    {
+      "stage": "Conditional Access restoration",
+      "name": "Lab policy is recorded report-only after the proof",
+      "result": "PASS"
+    },
+    {
+      "stage": "Conditional Access restoration",
+      "name": "Every temporarily isolated managed policy was restored",
+      "result": "PASS"
+    },
+    {
+      "stage": "Public artifact privacy",
+      "name": "Transient GitHub evidence artifact was deleted after verified download",
+      "result": "PASS"
+    },
+    {
+      "stage": "Live cleanup",
+      "name": "Ephemeral ACI container no longer exists",
+      "result": "PASS"
+    },
+    {
+      "stage": "Live cleanup",
+      "name": "Ephemeral GitHub runner is deregistered",
+      "result": "PASS"
+    }
+  ],
+  "independentVerification": {
+    "publicProofCommand": "./scripts/Invoke-EntraCbaVerification.ps1 -Tier PublicProof",
+    "freshRunGuidance": "Use Tier FreshRun in an authorized isolated environment with explicit tenant-mutation and Conditional Access maintenance-window consent."
+  },
+  "proofSha256": "a08d1983b2cbc2c0ab51752b6235a1c3496ec01cc946a38bce75e0ab2c242ecf"
+}

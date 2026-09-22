@@ -80,6 +80,10 @@ jobs:
         shell: pwsh
         run: ./solutions/entra-cba-playwright/scripts/Test-PublicTemplate.ps1
 
+      - name: Validate the customer-shareable fresh proof
+        working-directory: solutions/entra-cba-playwright
+        run: node scripts/Test-CustomerProof.mjs
+
       - name: Test deployment experience guardrails
         shell: pwsh
         run: ./solutions/entra-cba-playwright/scripts/Test-DeploymentExperience.ps1

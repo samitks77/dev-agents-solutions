@@ -189,7 +189,7 @@ switch ($Tier) {
         Write-TierBanner @'
 TIER A -- PUBLIC PROOF VERIFICATION
 No authentication, tenant access, or mutation. This validates local public-template safety plus
-the exact hash and pass/privacy contract of the published 37-check proof. It does not rerun CBA.
+the exact hash and pass/privacy contracts of the published 37-check proofs. It does not rerun CBA.
 '@
         & (Join-Path $PSScriptRoot 'Test-PublicTemplate.ps1')
 
@@ -248,7 +248,15 @@ the exact hash and pass/privacy contract of the published 37-check proof. It doe
         }
 
         Assert-PublicProof
-        Write-Host 'PUBLIC_PROOF_PASS: pinned published evidence is an exact privacy-safe 37/37 pass.'
+        & (Get-Command node -ErrorAction Stop).Source `
+            (Join-Path $PSScriptRoot 'Test-CustomerProof.mjs')
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The customer verification package did not satisfy its pinned proof contract.'
+        }
+        Write-Host (
+            'PUBLIC_PROOF_PASS: historical and latest customer evidence are exact ' +
+            'privacy-safe 37/37 passes.'
+        )
         Write-Host 'This result verifies published evidence; it does not perform a new CBA sign-in.'
     }
 
