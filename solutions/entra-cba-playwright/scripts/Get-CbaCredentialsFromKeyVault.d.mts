@@ -73,4 +73,10 @@ export function buildNetworkReceipt(input: {
   verifiedAt?: string;
 }): NetworkReceiptV3;
 
+export function validatePfxWithOpenSsl(
+  pfx: Buffer,
+  passphrase: string,
+  executable?: string,
+): Promise<void>;
+
 export const receiptSha256Pattern: RegExp;

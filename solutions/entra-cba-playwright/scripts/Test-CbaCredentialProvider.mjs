@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   loadCbaClientCertificate,
   receiptSha256Pattern,
+  validatePfxWithOpenSsl,
 } from './Get-CbaCredentialsFromKeyVault.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,74 @@ assert.ok(
   localCredential.clientCertificate.pfx.every((value) => value === 0),
   'dispose() must overwrite the JavaScript PFX buffer.',
 );
+
+const opensslExecutable =
+  process.env.CBA_TEST_OPENSSL_PATH || 'openssl';
+const opensslFixtureDirectory = await mkdtemp(
+  path.join(tmpdir(), 'entra-cba-openssl-test-'),
+);
+try {
+  const certificatePath = path.join(opensslFixtureDirectory, 'certificate.pem');
+  const privateKeyPath = path.join(opensslFixtureDirectory, 'private-key.pem');
+  const syntheticPassphrase = 'provider-contract-passphrase';
+  const passphraseEnvironmentName = 'CBA_SYNTHETIC_PFX_PASSPHRASE';
+  const opensslEnvironment = {
+    ...process.env,
+    [passphraseEnvironmentName]: syntheticPassphrase,
+  };
+  await execFileAsync(
+    opensslExecutable,
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-keyout',
+      privateKeyPath,
+      '-out',
+      certificatePath,
+      '-nodes',
+      '-subj',
+      '/CN=entra-cba-provider-test',
+      '-days',
+      '1',
+    ],
+    { env: opensslEnvironment },
+  );
+  const pfxResult = await execFileAsync(
+    opensslExecutable,
+    [
+      'pkcs12',
+      '-export',
+      '-out',
+      '-',
+      '-inkey',
+      privateKeyPath,
+      '-in',
+      certificatePath,
+      '-passout',
+      `env:${passphraseEnvironmentName}`,
+    ],
+    {
+      encoding: 'buffer',
+      env: opensslEnvironment,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  delete opensslEnvironment[passphraseEnvironmentName];
+  const syntheticPfx = Buffer.from(pfxResult.stdout);
+  try {
+    await validatePfxWithOpenSsl(
+      syntheticPfx,
+      syntheticPassphrase,
+      opensslExecutable,
+    );
+  } finally {
+    syntheticPfx.fill(0);
+  }
+} finally {
+  await rm(opensslFixtureDirectory, { recursive: true, force: true });
+}
 
 const githubSha = 'a'.repeat(40);
 const workflowRef =
